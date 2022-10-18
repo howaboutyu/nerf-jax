@@ -80,16 +80,17 @@ def integrate(model_func, params, origin, direction, key):
     
     t_delta = jnp.transpose(t_delta, [1,0]) 
     # Eq (3) in paper 
-    T_sum = jnp.cumsum(opacity*t_delta, 1)
-    T_i = jnp.insert(T_i, 0, jnp.array([[0.,0.,0.]]),0)
+    #T_sum = jnp.cumsum(opacity*t_delta, 1)
+    #T_i = jnp.cumsum(-opacity * t_delta + 1e-10) # , 0)  
+    #T_i = jnp.insert(T_i, 0, jnp.array([[0.,0.,0.]]),0)
+    #
+    #T_i = jnp.exp(-T_sum)[:-1]
     
-    T_i = jnp.exp(-T_sum)[:-1]
     
-    
-    #T_i = jnp.cumproduct(jnp.exp(-opacity * t_delta + 1e-10), 0)  
+    T_i = jnp.cumproduct(jnp.exp(-opacity * t_delta + 1e-10), 0)  
     ##T_i = jnp.insert(T_i, 0, 1.0) 
-    #T_i = jnp.insert(T_i, 0, jnp.array([[1.,1.,1.]]),0)
-    #T_i = T_i[:-1]
+    T_i = jnp.insert(T_i, 0, jnp.array([[1.,1.,1.]]),0)
+    T_i = T_i[:-1]
 
     
     #import pdb; pdb.set_trace() 
