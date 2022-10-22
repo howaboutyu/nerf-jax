@@ -1,5 +1,6 @@
 build:
 	@echo "building a jax image with gpu"
+	sudo docker build . -t jax-gpu -f Dockerfile.gpu
 
 
 start:
