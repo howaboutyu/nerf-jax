@@ -1,5 +1,5 @@
 from flax import linen as nn
-from flax.training import train_state
+from flax.training import train_state, checkpoints
 
 import jax
 from jax import grad, jit, vmap
@@ -10,95 +10,85 @@ import optax
 import cv2
 
 
-num_samples = 64 
+num_samples = 64 * 2 
 
 H, W = 100, 100
-L_position = 7 
+L_position = 5 
 
 
-def get_rays(H, W, focal, pose, num_splits):
-    x, y = jnp.mgrid[0:W, 0:H]
-    x = (x - W/2)/focal
-    y = (y - H/2)/focal
+def get_rays(H, W, focal, pose):
+    # get rays (origin and direction) split into `num_splits` arrays 
+    #x, y = jnp.mgrid[0:W, 0:H]
+    x, y = jnp.meshgrid(jnp.arange(W, dtype=jnp.float32), jnp.arange(H, dtype=jnp.float32), indexing='xy')
+    x = (x - 0.5 * W)/focal
+    y = -(y - 0.5 * H)/focal
 
-    y = -y # bender seems to use -y 
 
-    x = x.flatten()
-    y = y.flatten()
-
-    direction = jnp.stack([x, y, -jnp.ones_like(x)])
-    # Normalize direction
-    direction_norm = jnp.linalg.norm(direction, ord=2, axis=0)
-    direction = direction/direction_norm
+    
+    direction = jnp.stack([x, y, -jnp.ones_like(x)], -1)
 
     rot = pose[:3, :3] 
-    direction = jnp.matmul(rot, direction)
+    direction = (direction[..., jnp.newaxis, :] * rot).sum(-1)
+
+    # Normalize direction
+    direction_norm = jnp.linalg.norm(direction, axis=-1)
+    direction = direction/direction_norm[..., jnp.newaxis]
 
     translation = pose[:3, 3]
-    translation = translation[..., jnp.newaxis]
     origin = jnp.broadcast_to(translation, direction.shape)
     
+    return origin, direction 
+
     
-    origin = jnp.transpose(origin)
-    direction = jnp.transpose(direction)
-    origin = jnp.split(origin, num_splits)
-    direction = jnp.split(direction, num_splits)
-
- 
-    return jnp.array(origin), jnp.array(direction)
-
-
-        
-
 def encoding_func(x, L):
     encoded_array = [x]
     for i in range(L):
-        encoded_array.extend([jnp.sin(jnp.power(2., i) * jnp.pi * x), jnp.cos(jnp.power(2.,i) * jnp.pi * x)])
-    return jnp.array(encoded_array)
+        encoded_array.extend([jnp.sin(2. ** i * jnp.pi * x), jnp.cos(2. ** i * jnp.pi * x)])
+    return jnp.concatenate(encoded_array, -1)
 
-def integrate(model_func, params, origin, direction, key):
-    # data - origins [num_samples, 3]
-    # data - directions [num_samples, 3]
+def render(model_func, params, origin, direction, key, rand):
     t = jnp.linspace(2., 6., num_samples) 
-    random_shift = jax.random.uniform(key, (3, num_samples)) * (far-near)/num_samples  
-    t = t + random_shift 
-    points = origin[..., jnp.newaxis] + direction[..., jnp.newaxis]*t
-    encoded_x = encoding_func(points, L_position)
-    encoded_x = jnp.reshape(encoded_x, [-1, num_samples]) 
+
+    if rand: 
+        random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
+        t = t+ random_shift 
+    else:
+        t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
+
+    points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
+    points = jnp.squeeze(points)
+    points_flatten = points.reshape((-1, 3))
+    encoded_x = encoding_func(points_flatten, L_position)
     
-    encoded_x = jnp.transpose(encoded_x)
+    rgb_array, opacity_array = [], []
+    for _cc in range(0, encoded_x.shape[0], 4096*10):
+        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*10]) 
+        rgb_array.append(rgb)
+        opacity_array.append(opacity)
     
-    rgb, opacity = model_func.apply(params, encoded_x)   
-   
+    rgb = jnp.concatenate(rgb_array, 0)
+    opacity = jnp.concatenate(opacity_array, 0)
+    
+    rgb =rgb.reshape((points.shape[0], points.shape[1], num_samples, 3))
+    opacity =opacity.reshape((points.shape[0], points.shape[1], num_samples, 1))
+
     rgb = jax.nn.sigmoid(rgb)
-    opacity = jax.nn.relu(opacity)
+    opacity = jax.nn.relu(opacity) 
    
-    t_delta = t[..., 1:] - t[...,:-1]
-    #t_delta = jnp.concatenate([t_delta, jnp.array([1e10])])
-    t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]), [3, 1])], -1)
-    #t_delta = jnp.reshape(t_delta, [num_samples, 1])
-    
-    t_delta = jnp.transpose(t_delta, [1,0]) 
-    # Eq (3) in paper 
-    #T_sum = jnp.cumsum(opacity*t_delta, 1)
-    #T_i = jnp.cumsum(-opacity * t_delta + 1e-10) # , 0)  
-    #T_i = jnp.insert(T_i, 0, jnp.array([[0.,0.,0.]]),0)
-    #
-    #T_i = jnp.exp(-T_sum)[:-1]
-    
-    
-    T_i = jnp.cumproduct(jnp.exp(-opacity * t_delta + 1e-10), 0)  
-    ##T_i = jnp.insert(T_i, 0, 1.0) 
-    T_i = jnp.insert(T_i, 0, jnp.array([[1.,1.,1.]]),0)
-    T_i = T_i[:-1]
+    t_delta = t[...,1:] - t[...,:-1]
+    t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], points.shape[1], 1])], 2)
 
     
-    #import pdb; pdb.set_trace() 
+    T_i = jnp.cumsum(jnp.squeeze(opacity) * t_delta + 1e-10, -1)   
+    T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
+    T_i = jnp.exp(-T_i)[..., :-1]
      
-    c_array = T_i*(1.-jnp.exp(-opacity*t_delta)) * rgb 
-    c_sum =jnp.sum(c_array, 0)
+    c_array = T_i[..., jnp.newaxis]*(1.-jnp.exp(-opacity*t_delta[..., jnp.newaxis])) * rgb 
+    c_sum =jnp.sum(c_array, -2)
 
     return c_sum 
+
+render_concrete = lambda model_func, params, origin, direction, key: render(model_func, params, origin, direction, key, True)
 
 class Model(nn.Module):
 
@@ -114,133 +104,151 @@ class Model(nn.Module):
         if i == 4:
             z = jnp.concatenate([z, input], -1) 
 
-        if i == 7:
-            d = nn.Dense(32, name='fcd')(z)
-            d = nn.relu(d)
-            d = nn.Dense(1, name='fcd2')(d)
-            
+        if i == 7: 
+            d = nn.Dense(1, name='fcd2')(z)
 
-    
     z = nn.Dense(128, name='fc_128')(z)
     
     z = nn.Dense(3, name='fc_f')(z)
     return z, d 
 
 model = Model()
-params = model.init(jax.random.PRNGKey(50), jnp.ones((2000, L_position * 6 + 3)))
-learning_rate = 2e-4
+params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
+
+learning_rate = 5e-4
+
+
 optimizer = optax.adam(learning_rate)
 opt_state = optimizer.init(params)
 
+#opt_state = checkpoints.restore_checkpoint(ckpt_dir='ckpt_mm', target=opt_state)
+
 near = 2.
 far = 6.
+split_image = True
+split_dim = 4
+n_w = 2
+n_h = 2
+patch_w = W//n_w
+patch_h = H//n_h
 
-render = vmap(integrate, in_axes = (None, None, 0, 0, 0)) 
-render_batched = vmap(render, (None, None, 0, 0, 0) )
+@jit
 def get_grad(params, data):
     origins, directions, y_target, key = data
     def loss_func(params):
-        
-        keys = random.split(key, len(origins)) 
-        
-        #image_pred = jnp.reshape(jnp.zeros_like(y), [-1, 3])
-        #c_array = []
-        #for idx, (b_key, b_origins, b_directions) in enumerate(zip(keys, origins, directions)):
-        #    b_keys = random.split(b_key, len(b_origins))
-        #    c = render(model, params, b_origins, b_directions, b_keys) 
-        #    c_array.append(c)
-        #    #image_pred = image_pred.at[idx*c.shape[0]:(idx + 1) * c.shape[0]].set(c)
-        
-        #import pdb; pdb.set_trace()
-        image_pred = render(model, params, origins, directions, keys)
-        
-        #import pdb; pdb.set_trace() 
-        #import pdb; pdb.set_trace()
-        return jnp.mean(jnp.square(image_pred- y_target))
+            
+        image_pred = render_concrete(model, params, origins, directions, key)
+        return jnp.mean((image_pred -  y_target) ** 2), image_pred
 
-    loss_val, grads = jax.value_and_grad(loss_func)(params)
-    return loss_val, grads
+    (loss_val, image_pred), grads    = jax.value_and_grad(loss_func, has_aux=True)(params)
+    return loss_val, grads, image_pred
 
-#get_grad_batched = vmap(get_grad, (None, 0, 0, 0, 0))
 @jit
-def train_step(params, x, y, opt_state, key):
+def get_patches_grads(params, origins_split, directions_split, y_split, keys):
+    loss_array, grads_array, pred_train_array = jax.lax.map(lambda grad_input : get_grad(params, grad_input), (origins_split, directions_split, y_split, keys))
+    grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads_array)
+
+    loss_val = jnp.mean(loss_array)
+    return loss_val, grads, pred_train_array[0]
+
+def split2patches(data, n_w=n_w, n_h=n_h):
+    #patches_array = jnp.hsplit(data, n_h) 
+    #patches_array = [jnp.vsplit(p, n_w) for p in patches_array] 
+    #import pdb; pdb.set_trace()
+    patches_array = []
+
+    for i_w in jnp.arange(0, n_w, 1):
+        for i_h in jnp.arange(0, n_h, 1):
+            patches_array.append(data[i_h*patch_h:(i_h+1)*patch_h, i_w*patch_w:(i_w+1)*patch_w])
+    return jnp.stack(patches_array, 0)
+
+#split2patches_concrete = jit(lambda data : split2patches(data, patch_w, patch_h, n_w, n_h))
+
+def train_step(params, x, y, opt_state, key, split_image):
     
     origins, directions = x 
-    y_target = jnp.reshape(y, origins.shape)
-    
-    keys = random.split(key, len(x[0])) 
-    
-    
-    loss_array, grads_array = jax.lax.map(lambda grad_input : get_grad(params, grad_input), (origins, directions, y_target, keys))
+    y = jnp.array(y)
 
-    grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads_array)
-    #import pdb; pdb.set_trace()
-    #loss_val, grads = get_grad(params, x, y, key)    
-    loss_val = jnp.mean(loss_array)
+        
+    key, _ = random.split(key) 
+    
+    if split_image:     
+        #data = (origins, directions, y, key)
+        # Split the image into parts to avoid OEM error for low memory GPUs
+        origins_split = split2patches(origins) 
+        directions_split = split2patches(directions) 
+        y_split = split2patches(y) 
+        keys = random.split(key, len(y_split))
+        #import pdb; pdb.set_trace()
+
+       
+        loss_val, grads, pred_train = get_patches_grads(params, origins_split, directions_split, y_split, keys)
+        #def loss_func(params):
+        #    predictions = jax.lax.map(lambda data: get_prediction(params, data), (origins, directions, keys))
+        #    #prediction_array = []
+        #    #for i in [0, 1]:
+        #    #    for j in [0, 1]:
+        #    #        prediction_array.append(predictions[2*i + j].reshape((50, 50, 3)))
+
+
+        #    return jnp.mean(jnp.square(predictions- y_target.reshape((4, -1))))
+    else:
+        data = (origins, directions, y, key)
+        loss_val, grads, pred_train = get_grad(params, data)
+
     updates, opt_state = optimizer.update(grads, opt_state)
     params = optax.apply_updates(params, updates) 
-    
+     
     jax.debug.print('loss {}:', loss_val)
-    return params, opt_state, keys[0]
-    
-#c=jax.xla_computation(get_grad)(params, jnp.ones((64, 3)))
-#with open("t.dot", "w") as f:
-#    f.write(c.as_hlo_dot_graph()) 
-# key = random.PRNGKey(0) 
-# for i in range(10000000):    
-#     j = np.random.randint(0, 2)
-#     key, _ = random.split(key)
-#     params, opt_state = train_step(params, (-jnp.ones(( 60, 3))/2., j*jnp.ones(( 60, 3))/2.), jnp.ones((1))*j, opt_state, key)
+    return params, opt_state,key, pred_train
+
 
 data = np.load('tiny_nerf_data.npz')
 images = data['images']
 poses = data['poses']
 focal = data['focal']
 
-print(f'Images size : {images.shape}')
-print(f'Pose : {poses[0]}')
-print(f'Focal length: {focal}')
 
-
+H, W = 100, 100
     
 
 key = random.PRNGKey(0) 
-H, W = 100, 100
-batch_size =  2000 
 
-num_splits = (H * W) / batch_size
-get_rays_jit = jit(lambda pose: get_rays(H=H, W=W, focal=focal, pose=pose, num_splits=num_splits))
+batch_size = 2500 
+
+num_splits =  (H * W) / batch_size
+get_rays_jit = lambda pose: get_rays(H=H, W=W, focal=focal, pose=pose, num_splits=num_splits)
 
 
 
-for i in range(10000000):    
-    img_idx = np.random.randint(0, len(images) - 10)
+for epoch_cc in range(10000000):    
+    img_idx = epoch_cc % len(images) 
     image_train = images[img_idx]
 
     pose = poses[img_idx]
     
-    origins, directions = get_rays_jit(pose)
+    origins, directions=get_rays(100, 100, focal, pose)
     
     key, _ = random.split(key) 
-    params, opt_state, key = train_step(params, (origins, directions), image_train, opt_state, key)
+    params, opt_state, key, pred_train  = train_step(params, (origins, directions), image_train, opt_state, key, split_image)
+
+    cv2.imwrite(f'/tmp/train_{epoch_cc}.jpg', (np.array(pred_train)*255).astype(np.uint8))
     
+    #checkpoints.save_checkpoint(ckpt_dir='ckpt', target=opt_state, step=epoch_cc, overwrite=True)
+
     
-    if i%50 == 0:
+    if epoch_cc%50 == 0:
         print('Begin eval')
-        origins, directions = get_rays_jit(poses[101])
-        c_array = []
-        for b_origins, b_directions in zip(origins, directions):
-            b_keys = random.split(key, len(b_origins))
-            c = render(model, params, b_origins, b_directions, b_keys) 
-            c_array.append(c)
-            
-        c_array = jnp.concatenate(c_array) 
-        c_array = jnp.reshape(c_array, [100, 100, 3])
-        
-        c_array = np.array(c_array) 
-        pred_img = (c_array * 255.).astype(np.uint8)[:,:,::-1]
+        origins, directions = get_rays(100, 100, focal, poses[101])
+
+
+        pred_image = render(model, params, origins, directions, None, None)
+
+
+
+        pred_image = np.array(pred_image) 
+        pred_image = (pred_image * 255.).astype(np.uint8)[:,:,::-1]
         actual_img = (images[101]* 255.).astype(np.uint8)[:,:,::-1]
-        print('max image',np.max(pred_img))
-        cv2.imwrite(f'/tmp/pred_img{i}.jpg', pred_img)
+        cv2.imwrite(f'/tmp/pred_img{epoch_cc}.jpg', pred_image)
         cv2.imwrite(f'/tmp/actual.jpg', actual_img)
     
