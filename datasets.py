@@ -28,15 +28,26 @@ def get_rays(H, W, focal, pose):
 
     return origin, direction 
 
+def split2patches(data, n_w, n_h):
+    patches_array = jnp.hsplit(data, n_h) 
+    patches_array = jnp.array([jnp.vsplit(p, n_w) for p in patches_array])
+    patches = jnp.concatenate(patches_array)
+    return patches
+
+def patches2data(img, n_v):
+    data = jnp.hstack([jnp.vstack(s) for s in jnp.split(img, n_v)])
+    return data
 
 @dataclass
 class Dataset:    
     W: float    
     H: float
     focal: float
+    split_to_patch: bool
+    split_w: int
+    split_h: int
     imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
     poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
-
         
     def __iter__(self):
         self.n = 0
@@ -48,10 +59,18 @@ class Dataset:
             
             if self.n not in self.cache:
                 origins, directions = self.get_rays_jit(self.poses[self.n])
-                self.cache[self.n] = [origins, directions]
+                img = self.imgs[self.n]
+                if self.split_to_patch: 
+                    img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
+                        for data in [img, origins, directions] ]
+
+                self.cache[self.n] = [origins, directions, img]
             else:
-                origins, directions = self.cache[self.n]
-            return self.imgs[self.n], origins, directions 
+                origins, directions, img = self.cache[self.n]
+                
+                
+            
+            return img, origins, directions 
         else:
             raise StopIteration
         
@@ -59,20 +78,26 @@ class Dataset:
 
 class LegoDataset(Dataset): 
     
-    def __init__(self, data_path='nerf_synthetic/lego', subset='train', half_res=True):
+    def __init__(self, config, data_path='nerf_synthetic/lego', subset='train'):
         
         self.data_path = data_path
         self.key_to_data = subset 
         
         self.normalizer = lambda x : x/255.
                 
-        self.half_res = half_res
+        self.scale = config['scale'] 
+        
+        self.split_w = config['split_w']
+        self.split_h = config['split_h']
+
+        self.split_to_patch = config['split_to_patches']
 
         self.get_raw_data()
         
         self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
         
         self.cache = dict() 
+
 
     def get_raw_data(self):
 
@@ -86,7 +111,7 @@ class LegoDataset(Dataset):
         for t in transforms['frames']:
             img = cv2.imread(os.path.join(self.data_path, t['file_path'] + '.png'))
             
-            if self.half_res: img = cv2.resize(img, dsize=None, fx=0.5, fy=0.5)
+            if self.scale: img = cv2.resize(img, dsize=None, fx=self.scale, fy=self.scale)
 
             pose = jnp.array(t['transform_matrix'])
             imgs.append(self.normalizer(img))
@@ -103,13 +128,16 @@ class LegoDataset(Dataset):
         self.W = W
         self.focal = focal 
 
-        if self.half_res:
-            self.H = self.H//2
-            self.W = self.W//2
-            self.focal = self.focal/2.
+        if self.scale: self.focal = self.focal * self.scale
         
         
-
+def dataset_factory(config):
+    if config['dataset_name'] == 'lego':
+        return {
+            'train': LegoDataset(config, subset='train'),
+            'val': LegoDataset(config, subset='val'),
+            'test': LegoDataset(config, subset='test'),
+        }
 
 if __name__ == '__main__':
     dataset = LegoDataset() 
