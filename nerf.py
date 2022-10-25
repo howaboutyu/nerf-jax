@@ -137,9 +137,9 @@ def get_nerf_componets(config):
                                         tx=tx)
     
     # load from ckpt
-    if 'checkpoint_dir' in config:
-        print(f'Loading checkpoint from : {config["checkpoint_dir"]}')
-        #opt_state = checkpoints.restore_checkpoint(ckpt_dir=config['checkpoint_dir'], target=state)
+    if 'ckpt_dir' in config:
+        print(f'Loading checkpoint from : {config["ckpt_dir"]}')
+        state = checkpoints.restore_checkpoint(ckpt_dir=config['ckpt_dir'], target=state)
  
     model_components = {
         'model': model,
