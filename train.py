@@ -35,7 +35,10 @@ key = jax.random.PRNGKey(0)
 
 @jax.jit
 def train_step(params, data, state):
-    loss_val, grads, pred_train = grad_fn(params, data)
+    loss_val, grads, pred_train = jax.pmap(grad_fn, in_axes=(None, 0))(params, data)
+
+    loss_val = jnp.mean(loss_val)
+    grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads)
     state = state.apply_gradients(grads=grads)
     return params, state, loss_val, pred_train
 
@@ -45,12 +48,16 @@ for i in range(config['num_epochs']):
     for idx, (img, origins, directions) in enumerate(dataset['train']):
         key_train = key
         if config['split_to_patches']:
-            key_train = random.split(key, len(img))
+            key_train = random.split(key, img.shape[-4])
+
+        if config['use_batch']:
+            key_train = random.split(key, len(key_train) * dataset['train'].batch_size).reshape((-1, img.shape[-4], 2))
 
         data = (origins, directions, img, key_train)
         params, state, loss_val, pred_train = train_step(params, data, state)
         
         if config['split_to_patches']:
+            if config['use_batch']: pred_train = pred_train[0] # just take first example
             pred_train = patches2data(pred_train, dataset['train'].split_h)
             
         pred_train = np.array(pred_train*255)

@@ -93,6 +93,7 @@ def get_grad(model, params, data, render):
 
 
 def get_patches_grads(grad_fn, params, data):
+    # this function is implemented for GPUs with low memory
     origins, directions, y_targets, keys = data
     loss_array, grads_array, pred_train_array = jax.lax.map(
         lambda grad_input : \
