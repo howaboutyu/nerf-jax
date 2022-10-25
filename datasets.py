@@ -46,6 +46,8 @@ class Dataset:
     split_to_patch: bool
     split_w: int
     split_h: int
+    batch_size: int
+    use_batch: bool = False
     imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
     poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
         
@@ -56,21 +58,24 @@ class Dataset:
     def __next__(self):
         if self.n < len(self.imgs):
             self.n += 1
-            
-            if self.n not in self.cache:
-                origins, directions = self.get_rays_jit(self.poses[self.n])
-                img = self.imgs[self.n]
-                if self.split_to_patch: 
-                    img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
-                        for data in [img, origins, directions] ]
-
-                self.cache[self.n] = [origins, directions, img]
-            else:
-                origins, directions, img = self.cache[self.n]
+            img_batch, origins_batch, directions_batch = [], [], []
+            for _ in range(self.batch_size): 
+                if self.n not in self.cache:
+                    origins, directions = self.get_rays_jit(self.poses[self.n])
+                    img = self.imgs[self.n]
+                    if self.split_to_patch: 
+                        img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
+                            for data in [img, origins, directions] ]
+    
+                    self.cache[self.n] = [origins, directions, img]
+                else:
+                    origins, directions, img = self.cache[self.n]
+                img_batch.append(img)
+                origins_batch.append(origins)
+                directions_batch.append(directions)
                 
-                
-            
-            return img, origins, directions 
+             
+            return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
         else:
             raise StopIteration
         
@@ -91,6 +96,9 @@ class LegoDataset(Dataset):
         self.split_h = config['split_h']
 
         self.split_to_patch = config['split_to_patches']
+
+        if config['use_batch']:
+            self.batch_size = jax.local_device_count() 
 
         self.get_raw_data()
         
