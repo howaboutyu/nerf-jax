@@ -57,7 +57,6 @@ class Dataset:
 
     def __next__(self):
         if self.n < len(self.imgs):
-            self.n += 1
             img_batch, origins_batch, directions_batch = [], [], []
             for _ in range(self.batch_size): 
                 if self.n not in self.cache:
@@ -74,6 +73,7 @@ class Dataset:
                 origins_batch.append(origins)
                 directions_batch.append(directions)
                 
+                self.n += 1
              
             return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
         else:
@@ -99,6 +99,7 @@ class LegoDataset(Dataset):
 
         if config['use_batch']:
             self.batch_size = jax.local_device_count() 
+            print(f'Using batch mode with {self.batch_size} local devices')
 
         self.get_raw_data()
         
