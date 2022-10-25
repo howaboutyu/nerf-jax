@@ -19,7 +19,7 @@ with open('configs/lego.yaml') as file:
   config = yaml.safe_load(file)
 
 ckpt_dir = 'ckpt_lego' 
-
+print('-----------------')
 dataset = dataset_factory(config) 
 
 nerf_components = get_nerf_componets(config)
@@ -33,8 +33,8 @@ key = jax.random.PRNGKey(0)
 
 print(f'Hello here are your jax devices: {jax.devices()}')
 
-
-@jit
+grad_fn = jit(grad_fn)
+#@jit
 def train_step(data, state):
     loss_val, grads, pred_train = jax.pmap(grad_fn, in_axes=(None, 0))(state.params, data)
     loss_val = jnp.mean(loss_val)
