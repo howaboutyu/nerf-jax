@@ -1,7 +1,9 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+from flax.training import checkpoints, train_state
 import optax
+
 
 
 def encoding_func(x, L):
@@ -25,8 +27,8 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     encoded_x = encoding_func(points_flatten, L_position)
     
     rgb_array, opacity_array = [], []
-    for _cc in range(0, encoded_x.shape[0], 4096*10):
-        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*10]) 
+    for _cc in range(0, encoded_x.shape[0], 4096*20):
+        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*20]) 
         rgb_array.append(rgb)
         opacity_array.append(opacity)
     
@@ -104,15 +106,17 @@ def get_patches_grads(grad_fn, params, data):
 def get_nerf_componets(config):
     model, params = get_model(config['L_position'])
     
-    
     near = config['near'] 
     far = config['far'] 
     num_samples = config['num_samples'] 
     L_position = config['L_position']
-    #model_func, params, origin, direction, key, near, far, num_samples, L_position, rand)
+
+    
+    # render function for training with random sampling
     render_concrete = lambda model_func, params, origin, direction, key: \
         render(model_func, params, origin, direction, key, near, far, num_samples, L_position, True)
-        
+    
+    # render function for evaluation
     render_concrete_eval = lambda model_func, params, origin, direction: \
         render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False)
        
@@ -124,17 +128,23 @@ def get_nerf_componets(config):
     
     
     learning_rate = config['init_lr'] 
-
-    optimizer = optax.adam(learning_rate)
-    opt_state = optimizer.init(params)
+    
+    # create train state
+    tx = optax.adam(learning_rate)
+    state = train_state.TrainState.create(apply_fn=model.apply,
+                                        params=params,
+                                        tx=tx)
+    
+    # load from ckpt
+    if 'checkpoint_dir' in config:
+        print(f'Loading checkpoint from : {config["checkpoint_dir"]}')
+        #opt_state = checkpoints.restore_checkpoint(ckpt_dir=config['checkpoint_dir'], target=state)
  
     model_components = {
         'model': model,
-        'params': params,
         'render_eval_fn': render_concrete_eval,
         'grad_fn': grad_fn,
-        'optimizer': optimizer,
-        'opt_state': opt_state,
+        'state': state,
     }
 
     return model_components
