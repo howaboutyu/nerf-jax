@@ -8,3 +8,8 @@ RUN pip install "jax[cuda11_cudnn82]" -f https://storage.googleapis.com/jax-rele
 
 RUN apt-get install  -y
 
+COPY requirements.txt /tmp
+
+RUN python3 -m pip install -r /tmp/requirements.txt
+
+WORKDIR /nerf

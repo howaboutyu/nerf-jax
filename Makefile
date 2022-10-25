@@ -7,3 +7,6 @@ start:
 	wget https://people.eecs.berkeley.edu/~bmild/nerf/tiny_nerf_data.npz
 	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest bash
 
+train_lego:
+	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest python3 train.py
+
