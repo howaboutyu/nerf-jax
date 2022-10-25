@@ -46,7 +46,7 @@ class Dataset:
     split_to_patch: bool
     split_w: int
     split_h: int
-    batch_size: int
+    batch_size: int = 1
     use_batch: bool = False
     imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
     poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
