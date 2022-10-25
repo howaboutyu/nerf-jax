@@ -128,7 +128,6 @@ class LegoDataset(Dataset):
         self.W = W
         self.focal = focal 
 
-        if self.scale: self.focal = self.focal * self.scale
         
         
 def dataset_factory(config):
