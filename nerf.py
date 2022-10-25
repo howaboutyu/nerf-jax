@@ -121,11 +121,11 @@ def get_nerf_componets(config):
     render_concrete_eval = lambda model_func, params, origin, direction: \
         render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False)
        
-    grad_fn = jax.jit(lambda params, data: get_grad(model, params, data, render_concrete))
+    grad_fn = lambda params, data: get_grad(model, params, data, render_concrete)
 
     if config['split_to_patches']: 
         grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete)
-        grad_fn = jax.jit(lambda params, data : get_patches_grads(grad_fn_entire, params, data))
+        grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
     
     
     learning_rate = config['init_lr'] 
