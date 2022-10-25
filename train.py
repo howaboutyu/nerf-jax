@@ -31,11 +31,12 @@ model_fn = nerf_components['model']
 
 key = jax.random.PRNGKey(0)
 
+print(f'Hello here are your jax devices: {jax.devices()}')
 
-@jax.jit
+
+@jit
 def train_step(data, state):
     loss_val, grads, pred_train = jax.pmap(grad_fn, in_axes=(None, 0))(state.params, data)
-
     loss_val = jnp.mean(loss_val)
     grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads)
     state = state.apply_gradients(grads=grads)
@@ -49,8 +50,13 @@ for i in range(config['num_epochs']):
         if config['split_to_patches']:
             key_train = random.split(key, img.shape[-4])
 
-        if config['use_batch']:
-            key_train = random.split(key, len(key_train) * dataset['train'].batch_size).reshape((-1, img.shape[-4], 2))
+            if config['use_batch']:
+                key_train = random.split(key, len(key_train) * dataset['train'].batch_size).reshape((-1, img.shape[-4], 2))
+
+        #if config['use_batch']:
+        #    key_train = random.split(key, len(img))
+
+
 
         data = (origins, directions, img, key_train)
         state, loss_val, pred_train = train_step(data, state)
@@ -60,7 +66,7 @@ for i in range(config['num_epochs']):
             pred_train = patches2data(pred_train, dataset['train'].split_h)
             
         pred_train = np.array(pred_train*255)
-        print(f'Loss val {loss_val}')
+        print(f'Epoch {i} step {idx} loss : {loss_val}')
 
         key, _ = random.split(key)
         
