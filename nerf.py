@@ -48,11 +48,13 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     T_i = jnp.cumsum(jnp.squeeze(opacity) * t_delta + 1e-10, -1)   
     T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
     T_i = jnp.exp(-T_i)[..., :-1]
-     
-    c_array = T_i[..., jnp.newaxis]*(1.-jnp.exp(-opacity*t_delta[..., jnp.newaxis])) * rgb 
+    
+
+    weights = T_i[..., jnp.newaxis]*(1.-jnp.exp(-opacity*t_delta[..., jnp.newaxis])) 
+    c_array = weights * rgb 
     c_sum =jnp.sum(c_array, -2)
 
-    return c_sum 
+    return c_sum, weights 
 
 
 def get_model(L_position):
@@ -85,24 +87,24 @@ def get_model(L_position):
 def get_grad(model, params, data, render):
     origins, directions, y_target, key = data
     def loss_func(params):
-        image_pred = render(model, params, origins, directions, key)
-        return jnp.mean((image_pred -  y_target) ** 2), image_pred
+        image_pred, weights = render(model, params, origins, directions, key)
+        return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights)
 
-    (loss_val, image_pred), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
-    return loss_val, grads, image_pred
+    (loss_val, (image_pred, weights)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
+    return loss_val, grads, image_pred, weights
 
 
 def get_patches_grads(grad_fn, params, data):
     # this function is implemented for GPUs with low memory
     origins, directions, y_targets, keys = data
-    loss_array, grads_array, pred_train_array = jax.lax.map(
+    loss_array, grads_array, pred_train_array, weights_array = jax.lax.map(
         lambda grad_input : \
             grad_fn(params, grad_input), (origins, directions, y_targets, keys)
         )
     grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads_array)
 
     loss_val = jnp.mean(loss_array)
-    return loss_val, grads, pred_train_array
+    return loss_val, grads, pred_train_array, weights_array
 
 def get_nerf_componets(config):
     model, params = get_model(config['L_position'])
