@@ -33,13 +33,13 @@ key = jax.random.PRNGKey(0)
 
 print(f'Hello here are your jax devices: {jax.devices()}')
 
-@jit
+#@jit
 def train_step(data, state):
-    loss_val, grads, pred_train, weights = jax.pmap(grad_fn, in_axes=(None, 0))(state.params, data)
+    loss_val, grads, pred_train, weights, ts = jax.pmap(grad_fn, in_axes=(None, 0))(state.params, data)
     loss_val = jnp.mean(loss_val)
     grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads)
     state = state.apply_gradients(grads=grads)
-    return state, loss_val, pred_train, weights
+    return state, loss_val, pred_train, weights, ts
 
     
 for i in range(config['num_epochs']):
@@ -54,7 +54,7 @@ for i in range(config['num_epochs']):
 
 
         data = (origins, directions, img, key_train)
-        state, loss_val, pred_train, weights = train_step(data, state)
+        state, loss_val, pred_train, weights, ts = train_step(data, state)
         print(f'Epoch {i} step {idx} loss : {loss_val}')
         
         key, _ = random.split(key)
@@ -72,7 +72,7 @@ for i in range(config['num_epochs']):
             origins_eval = patches2data(origins[0], dataset['train'].split_h)
             directions_eval = patches2data(directions[0], dataset['train'].split_h)
 
-        pred_train, weights = render_fn(model_fn, state.params, origins_eval, directions_eval)
+        pred_train, weights, ts = render_fn(model_fn, state.params, origins_eval, directions_eval)
 
         pred_train = np.array(pred_train*255)
         print('max predicted image', np.max(pred_train))
