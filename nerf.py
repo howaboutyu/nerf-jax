@@ -14,13 +14,19 @@ def encoding_func(x, L):
 
 
 def hvs(weights, t, key):
-    weights = jnp.squeeze(weights) + 0.0000001
+    weights = jnp.squeeze(weights) + 1e-10 
 
     # normalize
     norm = jnp.sum(weights, -1)
     weights = weights/norm[..., jnp.newaxis]
 
     cdf = jnp.cumsum(weights, -1)
+
+    cdf = jnp.concatenate([
+        jnp.zeros_like(cdf[...,0][..., jnp.newaxis]), 
+        cdf, 
+        jnp.ones_like(cdf[..., 1][..., jnp.newaxis])], -1)
+ 
 
     # uniform sample
     Z = jax.random.uniform(key, t.shape)
@@ -32,6 +38,7 @@ def hvs(weights, t, key):
     sampled_t = jnp.take(t, argmin)
 
     new_t = jnp.concatenate([sampled_t, t], -1)
+    new_t = jnp.sort(new_t, -1)
     return new_t 
 
 def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
@@ -44,7 +51,8 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
         t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
 
         if use_hvs:
-            t = jax.lax.stop_gradient(hvs(weights, t, key))
+            t = hvs(weights, t, key)
+            t = jax.lax.stop_gradient(t) 
 
     
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
@@ -115,17 +123,13 @@ def get_grad(model, params, data, render, render_hvs, use_hvs):
     def loss_func(params):
         image_pred, weights, ts = render(model, params, origins, directions, key)
 
-        weights = jax.lax.stop_gradient(weights)
-
         if not use_hvs:
             return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights, ts)
 
-        else:
-            image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
+        image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
 
-            loss_hvs = jnp.mean((image_pred -  y_target) ** 2) + jnp.mean((image_pred_hvs -  y_target) ** 2)
-            return loss_hvs, (image_pred, weights, ts)
-
+        loss_hvs = jnp.mean((image_pred -  y_target) ** 2 + (image_pred_hvs -  y_target) ** 2)
+        return loss_hvs, (image_pred, weights, ts)
 
     (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
     return loss_val, grads, image_pred, weights, ts
