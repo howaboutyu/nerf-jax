@@ -8,8 +8,6 @@ from typing import List
 
 
 def get_rays(H, W, focal, pose):
-    # get rays (origin and direction) split into `num_splits` arrays 
-    #x, y = jnp.mgrid[0:W, 0:H]
     x, y = jnp.meshgrid(jnp.arange(W, dtype=jnp.float32), jnp.arange(H, dtype=jnp.float32), indexing='xy')
     x = (x - 0.5 * W)/focal
     y = -(y - 0.5 * H)/focal
@@ -48,6 +46,7 @@ class Dataset:
     split_h: int
     batch_size: int = 1
     use_batch: bool = False
+    max_eval: int = 2 
     imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
     poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
         
@@ -56,6 +55,9 @@ class Dataset:
         return self 
 
     def __next__(self):
+        if self.n > self.max_eval and self.subset == 'val':
+            raise StopIteration 
+
         if self.n < len(self.imgs):
             img_batch, origins_batch, directions_batch = [], [], []
             for _ in range(self.batch_size): 
@@ -86,7 +88,7 @@ class LegoDataset(Dataset):
     def __init__(self, config, data_path='nerf_synthetic/lego', subset='train'):
         
         self.data_path = data_path
-        self.key_to_data = subset 
+        self.subset = subset 
         
         self.normalizer = lambda x : x/255.
                 
@@ -111,7 +113,7 @@ class LegoDataset(Dataset):
     def get_raw_data(self):
 
 
-        json_p = os.path.join(self.data_path, f'transforms_{self.key_to_data}.json')
+        json_p = os.path.join(self.data_path, f'transforms_{self.subset}.json')
         
         with open(json_p, 'r') as fp: 
             transforms = json.load(fp)
