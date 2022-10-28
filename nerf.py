@@ -12,7 +12,29 @@ def encoding_func(x, L):
         encoded_array.extend([jnp.sin(2. ** i * jnp.pi * x), jnp.cos(2. ** i * jnp.pi * x)])
     return jnp.concatenate(encoded_array, -1)
 
-def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand):
+
+def hvs(weights, t, key):
+    weights = jnp.squeeze(weights) + 0.0000001
+
+    # normalize
+    norm = jnp.sum(weights, -1)
+    weights = weights/norm[..., jnp.newaxis]
+
+    cdf = jnp.cumsum(weights, -1)
+
+    # uniform sample
+    Z = jax.random.uniform(key, t.shape)
+
+    abs_diff = jnp.abs(Z[..., jnp.newaxis] - cdf[...,  jnp.newaxis, :])
+
+    argmin = jnp.argmin(abs_diff, -1)
+
+    sampled_t = jnp.take(t, argmin)
+
+    new_t = jnp.concatenate([sampled_t, t], -1)
+    return new_t 
+
+def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
     t = jnp.linspace(near, far, num_samples) 
 
     if rand: 
@@ -21,6 +43,10 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     else:
         t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
 
+        if use_hvs:
+            t = jax.lax.stop_gradient(hvs(weights, t, key))
+
+    
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
     points = jnp.squeeze(points)
     points_flatten = points.reshape((-1, 3))
@@ -35,8 +61,8 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     rgb = jnp.concatenate(rgb_array, 0)
     opacity = jnp.concatenate(opacity_array, 0)
     
-    rgb =rgb.reshape((points.shape[0], points.shape[1], num_samples, 3))
-    opacity =opacity.reshape((points.shape[0], points.shape[1], num_samples, 1))
+    rgb =rgb.reshape((points.shape[0], points.shape[1], t.shape[-1], 3))
+    opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
 
     rgb = jax.nn.sigmoid(rgb)
     opacity = jax.nn.relu(opacity) 
@@ -84,11 +110,22 @@ def get_model(L_position):
     params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
     return model, params
 
-def get_grad(model, params, data, render):
+def get_grad(model, params, data, render, render_hvs, use_hvs):
     origins, directions, y_target, key = data
     def loss_func(params):
         image_pred, weights = render(model, params, origins, directions, key)
-        return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights)
+
+        weights = jax.lax.stop_gradient(weights)
+
+        if not use_hvs:
+            return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights)
+
+        else:
+            image_pred_hvs, weights_hvs  = render_hvs(model, params, origins, directions, key, weights)
+
+            loss_hvs = jnp.mean((image_pred -  y_target) ** 2) + jnp.mean((image_pred_hvs -  y_target) ** 2)
+            return loss_hvs, (image_pred, weights)
+
 
     (loss_val, (image_pred, weights)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
     return loss_val, grads, image_pred, weights
@@ -112,21 +149,28 @@ def get_nerf_componets(config):
     near = config['near'] 
     far = config['far'] 
     num_samples = config['num_samples'] 
+    use_hvs = config['use_hvs']
+    hvs_num_samples = config['hvs_num_samples'] 
     L_position = config['L_position']
 
     
     # render function for training with random sampling
     render_concrete = lambda model_func, params, origin, direction, key: \
-        render(model_func, params, origin, direction, key, near, far, num_samples, L_position, True)
+        render(model_func, params, origin, direction, key, near, far, num_samples, L_position, True, False, None)
+
+    # render function for training with Hierarchical volume sampling (hvs) 
+    render_concrete_hvs = lambda model_func, params, origin, direction, key, weights: \
+        render(model_func, params, origin, direction, key, near, far, hvs_num_samples, L_position, False, True, weights)
+
     
     # render function for evaluation
     render_concrete_eval = lambda model_func, params, origin, direction: \
-        render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False)
+        render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False, False, None)
        
-    grad_fn = lambda params, data: get_grad(model, params, data, render_concrete)
+    grad_fn = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
 
     if config['split_to_patches']: 
-        grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete)
+        grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
         grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
     
     
