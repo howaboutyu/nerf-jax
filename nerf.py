@@ -80,7 +80,7 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     c_array = weights * rgb 
     c_sum =jnp.sum(c_array, -2)
 
-    return c_sum, weights 
+    return c_sum, weights, t
 
 
 def get_model(L_position):
@@ -113,35 +113,35 @@ def get_model(L_position):
 def get_grad(model, params, data, render, render_hvs, use_hvs):
     origins, directions, y_target, key = data
     def loss_func(params):
-        image_pred, weights = render(model, params, origins, directions, key)
+        image_pred, weights, ts = render(model, params, origins, directions, key)
 
         weights = jax.lax.stop_gradient(weights)
 
         if not use_hvs:
-            return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights)
+            return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights, ts)
 
         else:
-            image_pred_hvs, weights_hvs  = render_hvs(model, params, origins, directions, key, weights)
+            image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
 
             loss_hvs = jnp.mean((image_pred -  y_target) ** 2) + jnp.mean((image_pred_hvs -  y_target) ** 2)
-            return loss_hvs, (image_pred, weights)
+            return loss_hvs, (image_pred, weights, ts)
 
 
-    (loss_val, (image_pred, weights)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
-    return loss_val, grads, image_pred, weights
+    (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
+    return loss_val, grads, image_pred, weights, ts
 
 
 def get_patches_grads(grad_fn, params, data):
     # this function is implemented for GPUs with low memory
     origins, directions, y_targets, keys = data
-    loss_array, grads_array, pred_train_array, weights_array = jax.lax.map(
+    loss_array, grads_array, pred_train_array, weights_array, t_array = jax.lax.map(
         lambda grad_input : \
             grad_fn(params, grad_input), (origins, directions, y_targets, keys)
         )
     grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads_array)
 
     loss_val = jnp.mean(loss_array)
-    return loss_val, grads, pred_train_array, weights_array
+    return loss_val, grads, pred_train_array, weights_array, t_array
 
 def get_nerf_componets(config):
     model, params = get_model(config['L_position'])
