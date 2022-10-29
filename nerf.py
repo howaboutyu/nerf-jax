@@ -47,12 +47,17 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     if rand: 
         random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
         t = t+ random_shift 
+
+    elif use_hvs:
+        random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
+        t = t+ random_shift 
+
+        t = hvs(weights, t, key)
+        t = jax.lax.stop_gradient(t) 
+
     else:
         t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
 
-        if use_hvs:
-            t = hvs(weights, t, key)
-            t = jax.lax.stop_gradient(t) 
 
     
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
@@ -128,7 +133,7 @@ def get_grad(model, params, data, render, render_hvs, use_hvs):
 
         image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
 
-        loss_hvs = jnp.mean((image_pred -  y_target) ** 2 + (image_pred_hvs -  y_target) ** 2)
+        loss_hvs = jnp.mean((image_pred -  y_target) ** 2 )+ jnp.mean((image_pred_hvs -  y_target) ** 2)
         return loss_hvs, (image_pred, weights, ts)
 
     (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
