@@ -78,7 +78,11 @@ class Dataset:
                 
                 self.n += 1
              
-            return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
+            return [
+                    jnp.swapaxes(jnp.array(img_batch), 0, 1), 
+                    jnp.swapaxes(jnp.array(origins_batch), 0, 1), 
+                    jnp.swapaxes(jnp.array(directions_batch), 0, 1)
+                    ]
         else:
             raise StopIteration
         

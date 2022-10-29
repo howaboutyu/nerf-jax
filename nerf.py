@@ -62,20 +62,20 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
     points = jnp.squeeze(points)
-    points_flatten = points.reshape((-1, 3))
-    encoded_x = encoding_func(points_flatten, L_position)
+    #points_flatten = points.reshape((-1, 3))
+    encoded_x = encoding_func(points, L_position)
     
-    rgb_array, opacity_array = [], []
-    for _cc in range(0, encoded_x.shape[0], 4096*20):
-        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*20]) 
-        rgb_array.append(rgb)
-        opacity_array.append(opacity)
+    #rgb_array, opacity_array = [], []
+    #for _cc in range(0, encoded_x.shape[0], 4096*20):
+    rgb, opacity = model_func.apply(params, encoded_x) 
+    #    rgb_array.append(rgb)
+    #    opacity_array.append(opacity)
     
-    rgb = jnp.concatenate(rgb_array, 0)
-    opacity = jnp.concatenate(opacity_array, 0)
+    #rgb = jnp.concatenate(rgb_array, 0)
+    #opacity = jnp.concatenate(opacity_array, 0)
     
-    rgb =rgb.reshape((points.shape[0], points.shape[1], t.shape[-1], 3))
-    opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
+    #rgb =rgb.reshape((points.shape[0], points.shape[1], t.shape[-1], 3))
+    #opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
 
     rgb = jax.nn.sigmoid(rgb)
     opacity = jax.nn.relu(opacity) 
@@ -178,9 +178,9 @@ def get_nerf_componets(config):
        
     grad_fn = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
 
-    if config['split_to_patches']: 
-        grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
-        grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
+    #if config['split_to_patches']: 
+    #    grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
+    #    grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
     
     
     learning_rate = config['init_lr'] 

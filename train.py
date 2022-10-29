@@ -15,7 +15,7 @@ from nerf import get_nerf_componets
 from datasets import dataset_factory, patches2data
 
 # TODO: add input args 
-with open('configs/fern.yaml') as file:
+with open('configs/lego.yaml') as file:
   config = yaml.safe_load(file)
 
 ckpt_dir = 'ckpt_lego' 
@@ -44,23 +44,31 @@ def train_step(data, state):
     
 for i in range(config['num_epochs']):
     
-    for idx, (img, origins, directions) in enumerate(dataset['train']):
-        key_train = key
-        if config['split_to_patches']:
-            key_train = random.split(key, img.shape[-4])
+    for idx, (img_batch, origins_batch, directions_batch) in enumerate(dataset['train']):
+        #if config['split_to_patches']:
+        #    key_train = random.split(key, img.shape[-4])
 
-            if config['use_batch']:
-                key_train = random.split(key, len(key_train) * dataset['train'].batch_size).reshape((-1, img.shape[-4], 2))
+        #    if config['use_batch']:
+        #        key_train = random.split(key, len(key_train) * dataset['train'].batch_size).reshape((-1, img.shape[-4], 2))
+        
+        pred_train_array = []
+        for img, origins, directions in zip(img_batch, origins_batch, directions_batch): 
+
+            print('-------------')
+            key_train = random.split(key,  dataset['train'].batch_size).reshape((-1, 2))
+            data = (origins, directions, img, key_train)
 
 
-        data = (origins, directions, img, key_train)
-        state, loss_val, pred_train, weights, ts = train_step(data, state)
+            state, loss_val, pred_train, weights, ts = train_step(data, state)
+
+            key, _ = random.split(key)
+
+            pred_train_array.append(pred_train[0]) # just take first example
         print(f'Epoch {i} step {idx} loss : {loss_val}')
 
+        
 
-        pred_train = pred_train[0] # just take first example
-
-        pred_train = patches2data(pred_train, dataset['train'].split_h)
+        pred_train = patches2data(jnp.array(pred_train_array), dataset['train'].split_h)
 
         pred_train = np.array(pred_train*255)
         print('max predicted image', np.max(pred_train))
@@ -69,7 +77,6 @@ for i in range(config['num_epochs']):
         print('write succ', succ)
 
         
-        key, _ = random.split(key)
     continue
     # Evaluation
     for idx, (img, origins, directions) in enumerate(dataset['val']):
