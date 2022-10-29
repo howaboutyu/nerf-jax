@@ -15,7 +15,7 @@ from nerf import get_nerf_componets
 from datasets import dataset_factory, patches2data
 
 # TODO: add input args 
-with open('configs/lego.yaml') as file:
+with open('configs/fern.yaml') as file:
   config = yaml.safe_load(file)
 
 ckpt_dir = 'ckpt_lego' 
@@ -56,16 +56,27 @@ for i in range(config['num_epochs']):
         data = (origins, directions, img, key_train)
         state, loss_val, pred_train, weights, ts = train_step(data, state)
         print(f'Epoch {i} step {idx} loss : {loss_val}')
+
+
+        pred_train = pred_train[0] # just take first example
+
+        pred_train = patches2data(pred_train, dataset['train'].split_h)
+
+        pred_train = np.array(pred_train*255)
+        print('max predicted image', np.max(pred_train))
+
+        succ = cv2.imwrite(f'/tmp/train_image_{idx}_at_epoch_{i}.jpg', pred_train)
+        print('write succ', succ)
+
         
         key, _ = random.split(key)
-
+    continue
     # Evaluation
     for idx, (img, origins, directions) in enumerate(dataset['val']):
         print('evaluating')
         
         data = (origins, directions, img, key_train)
          
-        pred_train = pred_train[0] # just take first example
         weights = weights[0]
 
         if config['split_to_patches']:
