@@ -21,6 +21,10 @@ create_tpu_vm:
 start_tpu_vm:
 	gcloud compute tpus tpu-vm start nerf --zone europe-west4-a 
 
+stop_tpu_vm:
+	gcloud compute tpus tpu-vm stop nerf --zone europe-west4-a 
+
+
 connect_tpu_vm:
 	gcloud compute tpus tpu-vm ssh nerf --zone europe-west4-a
 
