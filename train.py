@@ -57,7 +57,6 @@ for i in range(config['num_epochs']):
         state, loss_val, pred_train, weights, ts = train_step(data, state)
         print(f'Epoch {i} step {idx} loss : {loss_val}')
 
-
         pred_train = pred_train[0] # just take first example
 
         pred_train = patches2data(pred_train, dataset['train'].split_h)
@@ -70,6 +69,8 @@ for i in range(config['num_epochs']):
 
         
         key, _ = random.split(key)
+
+    checkpoints.save_checkpoint(ckpt_dir=ckpt_dir, target=state, step=i, overwrite=True)
     continue
     # Evaluation
     for idx, (img, origins, directions) in enumerate(dataset['val']):
@@ -90,5 +91,4 @@ for i in range(config['num_epochs']):
 
         cv2.imwrite(f'/tmp/eval_image_{idx}_at_epoch_{i}.jpg', pred_train)
 
-    checkpoints.save_checkpoint(ckpt_dir=ckpt_dir, target=state, step=i, overwrite=True)
  
