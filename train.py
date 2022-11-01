@@ -15,29 +15,31 @@ from nerf import get_nerf_componets
 from datasets import dataset_factory, patches2data
 
 # TODO: add input args 
-with open('configs/lego.yaml') as file:
+with open('configs/fern.yaml') as file:
   config = yaml.safe_load(file)
 
 ckpt_dir = 'ckpt_lego' 
-
+print('-----------------')
 dataset = dataset_factory(config) 
 
 nerf_components = get_nerf_componets(config)
 
 state = nerf_components['state']
-params = nerf_components['state'].params
 grad_fn = nerf_components['grad_fn']
 render_fn = nerf_components['render_eval_fn']
 model_fn = nerf_components['model']
 
 key = jax.random.PRNGKey(0)
 
+print(f'Hello here are your jax devices: {jax.devices()}')
 
-@jax.jit
-def train_step(params, data, state):
-    loss_val, grads, pred_train = grad_fn(params, data)
+#@jit
+def train_step(data, state):
+    loss_val, grads, pred_train, weights, ts = jax.pmap(grad_fn, in_axes=(None, 0))(state.params, data)
+    loss_val = jnp.mean(loss_val)
+    grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads)
     state = state.apply_gradients(grads=grads)
-    return params, state, loss_val, pred_train
+    return state, loss_val, pred_train, weights, ts
 
     
 for i in range(config['num_epochs']):
@@ -45,20 +47,48 @@ for i in range(config['num_epochs']):
     for idx, (img, origins, directions) in enumerate(dataset['train']):
         key_train = key
         if config['split_to_patches']:
-            key_train = random.split(key, len(img))
+            key_train = random.split(key, img.shape[-4])
+
+            if config['use_batch']:
+                key_train = random.split(key, len(key_train) * dataset['train'].batch_size).reshape((-1, img.shape[-4], 2))
+
 
         data = (origins, directions, img, key_train)
-        params, state, loss_val, pred_train = train_step(params, data, state)
-        
-        if config['split_to_patches']:
-            pred_train = patches2data(pred_train, dataset['train'].split_h)
-            
-        pred_train = np.array(pred_train*255)
-        print(f'Loss val {loss_val}')
+        state, loss_val, pred_train, weights, ts = train_step(data, state)
+        print(f'Epoch {i} step {idx} loss : {loss_val}')
 
-        key, _ = random.split(key)
+        pred_train = pred_train[0] # just take first example
+
+        pred_train = patches2data(pred_train, dataset['train'].split_h)
+
+        pred_train = np.array(pred_train*255)
+        print('max predicted image', np.max(pred_train))
+
+        succ = cv2.imwrite(f'/tmp/train_image_{idx}_at_epoch_{i}.jpg', pred_train)
+        print('write succ', succ)
+
         
-    cv2.imwrite(f'/tmp/train_{i}_{idx}.jpg', pred_train)
+        key, _ = random.split(key)
 
     checkpoints.save_checkpoint(ckpt_dir=ckpt_dir, target=state, step=i, overwrite=True)
+    continue
+    # Evaluation
+    for idx, (img, origins, directions) in enumerate(dataset['val']):
+        print('evaluating')
+        
+        data = (origins, directions, img, key_train)
+         
+        weights = weights[0]
+
+        if config['split_to_patches']:
+            origins_eval = patches2data(origins[0], dataset['train'].split_h)
+            directions_eval = patches2data(directions[0], dataset['train'].split_h)
+
+        pred_train, weights, ts = render_fn(model_fn, state.params, origins_eval, directions_eval)
+
+        pred_train = np.array(pred_train*255)
+        print('max predicted image', np.max(pred_train))
+
+        cv2.imwrite(f'/tmp/eval_image_{idx}_at_epoch_{i}.jpg', pred_train)
+
  

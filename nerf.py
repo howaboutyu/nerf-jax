@@ -12,15 +12,54 @@ def encoding_func(x, L):
         encoded_array.extend([jnp.sin(2. ** i * jnp.pi * x), jnp.cos(2. ** i * jnp.pi * x)])
     return jnp.concatenate(encoded_array, -1)
 
-def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand):
+
+def hvs(weights, t, key):
+    weights = jnp.squeeze(weights) + 1e-10 
+
+    # normalize
+    norm = jnp.sum(weights, -1)
+    weights = weights/norm[..., jnp.newaxis]
+
+    cdf = jnp.cumsum(weights, -1)
+
+    cdf = jnp.concatenate([
+        jnp.zeros_like(cdf[...,0][..., jnp.newaxis]), 
+        cdf, 
+        jnp.ones_like(cdf[..., 1][..., jnp.newaxis])], -1)
+ 
+
+    # uniform sample
+    Z = jax.random.uniform(key, t.shape)
+
+    abs_diff = jnp.abs(Z[..., jnp.newaxis] - cdf[...,  jnp.newaxis, :])
+
+    argmin = jnp.argmin(abs_diff, -1)
+
+    sampled_t = jnp.take(t, argmin)
+
+    new_t = jnp.concatenate([sampled_t, t], -1)
+    new_t = jnp.sort(new_t, -1)
+    return new_t 
+
+def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
     t = jnp.linspace(near, far, num_samples) 
 
     if rand: 
         random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
         t = t+ random_shift 
+
+    elif use_hvs:
+        random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
+        t = t+ random_shift 
+
+        t = hvs(weights, t, key)
+        t = jax.lax.stop_gradient(t) 
+
     else:
         t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
 
+
+    
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
     points = jnp.squeeze(points)
     points_flatten = points.reshape((-1, 3))
@@ -35,8 +74,8 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     rgb = jnp.concatenate(rgb_array, 0)
     opacity = jnp.concatenate(opacity_array, 0)
     
-    rgb =rgb.reshape((points.shape[0], points.shape[1], num_samples, 3))
-    opacity =opacity.reshape((points.shape[0], points.shape[1], num_samples, 1))
+    rgb =rgb.reshape((points.shape[0], points.shape[1], t.shape[-1], 3))
+    opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
 
     rgb = jax.nn.sigmoid(rgb)
     opacity = jax.nn.relu(opacity) 
@@ -48,11 +87,13 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     T_i = jnp.cumsum(jnp.squeeze(opacity) * t_delta + 1e-10, -1)   
     T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
     T_i = jnp.exp(-T_i)[..., :-1]
-     
-    c_array = T_i[..., jnp.newaxis]*(1.-jnp.exp(-opacity*t_delta[..., jnp.newaxis])) * rgb 
+    
+
+    weights = T_i[..., jnp.newaxis]*(1.-jnp.exp(-opacity*t_delta[..., jnp.newaxis])) 
+    c_array = weights * rgb 
     c_sum =jnp.sum(c_array, -2)
 
-    return c_sum 
+    return c_sum, weights, t
 
 
 def get_model(L_position):
@@ -82,26 +123,34 @@ def get_model(L_position):
     params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
     return model, params
 
-def get_grad(model, params, data, render):
+def get_grad(model, params, data, render, render_hvs, use_hvs):
     origins, directions, y_target, key = data
     def loss_func(params):
-        image_pred = render(model, params, origins, directions, key)
-        return jnp.mean((image_pred -  y_target) ** 2), image_pred
+        image_pred, weights, ts = render(model, params, origins, directions, key)
 
-    (loss_val, image_pred), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
-    return loss_val, grads, image_pred
+        if not use_hvs:
+            return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights, ts)
+
+        image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
+
+        loss_hvs = jnp.mean((image_pred -  y_target) ** 2 )+ jnp.mean((image_pred_hvs -  y_target) ** 2)
+        return loss_hvs, (image_pred, weights, ts)
+
+    (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
+    return loss_val, grads, image_pred, weights, ts
 
 
 def get_patches_grads(grad_fn, params, data):
+    # this function is implemented for GPUs with low memory
     origins, directions, y_targets, keys = data
-    loss_array, grads_array, pred_train_array = jax.lax.map(
+    loss_array, grads_array, pred_train_array, weights_array, t_array = jax.lax.map(
         lambda grad_input : \
             grad_fn(params, grad_input), (origins, directions, y_targets, keys)
         )
     grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads_array)
 
     loss_val = jnp.mean(loss_array)
-    return loss_val, grads, pred_train_array
+    return loss_val, grads, pred_train_array, weights_array, t_array
 
 def get_nerf_componets(config):
     model, params = get_model(config['L_position'])
@@ -109,22 +158,29 @@ def get_nerf_componets(config):
     near = config['near'] 
     far = config['far'] 
     num_samples = config['num_samples'] 
+    use_hvs = config['use_hvs']
+    hvs_num_samples = config['hvs_num_samples'] 
     L_position = config['L_position']
 
     
     # render function for training with random sampling
     render_concrete = lambda model_func, params, origin, direction, key: \
-        render(model_func, params, origin, direction, key, near, far, num_samples, L_position, True)
+        render(model_func, params, origin, direction, key, near, far, num_samples, L_position, True, False, None)
+
+    # render function for training with Hierarchical volume sampling (hvs) 
+    render_concrete_hvs = lambda model_func, params, origin, direction, key, weights: \
+        render(model_func, params, origin, direction, key, near, far, hvs_num_samples, L_position, False, True, weights)
+
     
     # render function for evaluation
     render_concrete_eval = lambda model_func, params, origin, direction: \
-        render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False)
+        render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False, False, None)
        
-    grad_fn = jax.jit(lambda params, data: get_grad(model, params, data, render_concrete))
+    grad_fn = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
 
     if config['split_to_patches']: 
-        grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete)
-        grad_fn = jax.jit(lambda params, data : get_patches_grads(grad_fn_entire, params, data))
+        grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
+        grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
     
     
     learning_rate = config['init_lr'] 
@@ -136,9 +192,9 @@ def get_nerf_componets(config):
                                         tx=tx)
     
     # load from ckpt
-    if 'checkpoint_dir' in config:
-        print(f'Loading checkpoint from : {config["checkpoint_dir"]}')
-        #opt_state = checkpoints.restore_checkpoint(ckpt_dir=config['checkpoint_dir'], target=state)
+    if 'ckpt_dir' in config:
+        print(f'Loading checkpoint from : {config["ckpt_dir"]}')
+        state = checkpoints.restore_checkpoint(ckpt_dir=config['ckpt_dir'], target=state)
  
     model_components = {
         'model': model,
