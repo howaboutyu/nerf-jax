@@ -13,7 +13,7 @@ def encoding_func(x, L):
     return jnp.concatenate(encoded_array, -1)
 
 
-def hvs(weights, t, key):
+def hvs(weights, t, t_to_sample, key):
     weights = jnp.squeeze(weights) + 1e-10 
 
     # normalize
@@ -22,23 +22,27 @@ def hvs(weights, t, key):
 
     cdf = jnp.cumsum(weights, -1)
 
-    cdf = jnp.concatenate([
-        jnp.zeros_like(cdf[...,0][..., jnp.newaxis]), 
-        cdf, 
-        jnp.ones_like(cdf[..., 1][..., jnp.newaxis])], -1)
+#    cdf = jnp.concatenate([
+#        jnp.zeros_like(cdf[...,0][..., jnp.newaxis]), 
+#        cdf, 
+#        jnp.ones_like(cdf[..., 1][..., jnp.newaxis])], -1)
  
 
     # uniform sample
-    Z = jax.random.uniform(key, t.shape)
+    Z = jax.random.uniform(key, t_to_sample.shape)
 
     abs_diff = jnp.abs(Z[..., jnp.newaxis] - cdf[...,  jnp.newaxis, :])
 
     argmin = jnp.argmin(abs_diff, -1)
 
-    sampled_t = jnp.take(t, argmin)
-
+    sampled_t = jnp.take_along_axis(t_to_sample, argmin, -1)
+    
+    #jax.debug.print('max argmin  : {}', jnp.max(argmin))
+    #jax.debug.print('sampled t : {}', sampled_t[0,0,:])
+    #jax.debug.print('argmin  : {}', argmin[0,0,:])
     new_t = jnp.concatenate([sampled_t, t], -1)
     new_t = jnp.sort(new_t, -1)
+    jax.debug.print('hvs t shape: {}', new_t.shape)
     return new_t 
 
 def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
@@ -49,10 +53,13 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
         t = t+ random_shift 
 
     elif use_hvs:
-        random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
-        t = t+ random_shift 
 
-        t = hvs(weights, t, key)
+        t_to_sample = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
+
+        t = jnp.linspace(near, far, weights.shape[-2]) 
+        t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], weights.shape[-2]))
+
+        t = hvs(weights, t, t_to_sample, key)
         t = jax.lax.stop_gradient(t) 
 
     else:
@@ -66,8 +73,8 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     encoded_x = encoding_func(points_flatten, L_position)
     
     rgb_array, opacity_array = [], []
-    for _cc in range(0, encoded_x.shape[0], 4096*20):
-        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*20]) 
+    for _cc in range(0, encoded_x.shape[0], 4096*1):
+        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*1]) 
         rgb_array.append(rgb)
         opacity_array.append(opacity)
     
@@ -134,7 +141,7 @@ def get_grad(model, params, data, render, render_hvs, use_hvs):
         image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
 
         loss_hvs = jnp.mean((image_pred -  y_target) ** 2 )+ jnp.mean((image_pred_hvs -  y_target) ** 2)
-        return loss_hvs, (image_pred, weights, ts)
+        return loss_hvs, (image_pred_hvs, weights, ts)
 
     (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
     return loss_val, grads, image_pred, weights, ts
