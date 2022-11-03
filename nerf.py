@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import checkpoints, train_state
 import optax
+from typing import Any
 
 
 
@@ -28,53 +29,64 @@ def hvs(weights, t, t_to_sample, key):
 #        jnp.ones_like(cdf[..., 1][..., jnp.newaxis])], -1)
  
 
-    # uniform sample
+
+    def inverse_sample(Z):
+    
+        abs_diff = jnp.abs(cdf[...,  jnp.newaxis, :] - Z[..., jnp.newaxis])
+    
+        argmin = jnp.argmin(abs_diff, -2)
+    
+        sampled_t = jnp.take_along_axis(t_to_sample, argmin, -1)
+        return sampled_t
+
+
     Z = jax.random.uniform(key, t_to_sample.shape)
 
-    abs_diff = jnp.abs(Z[..., jnp.newaxis] - cdf[...,  jnp.newaxis, :])
+    key, _ = jax.random.split(key)
+    sampled_t1 = inverse_sample(Z)
 
-    argmin = jnp.argmin(abs_diff, -1)
+    Z = jax.random.uniform(key, t_to_sample.shape)
+    sampled_t2 = inverse_sample(Z)
 
-    sampled_t = jnp.take_along_axis(t_to_sample, argmin, -1)
-    
+    #jax.debug.breakpoint()
     #jax.debug.print('max argmin  : {}', jnp.max(argmin))
-    #jax.debug.print('sampled t : {}', sampled_t[0,0,:])
-    #jax.debug.print('argmin  : {}', argmin[0,0,:])
-    new_t = jnp.concatenate([sampled_t, t], -1)
+    #jax.debug.print('sampled t : {}', sampled_t[0, :])
+    #jax.debug.print('argmin  : {}', argmin[0,:])
+    new_t = jnp.concatenate([sampled_t1, sampled_t2, t], -1)
     new_t = jnp.sort(new_t, -1)
-    jax.debug.print('hvs t shape: {}', new_t.shape)
+    #jax.debug.print('hvs t shape: {}', new_t.shape)
     return new_t 
 
 def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
     t = jnp.linspace(near, far, num_samples) 
 
     if rand: 
-        random_shift = jax.random.uniform(key, (origin.shape[0], origin.shape[1], num_samples)) * (far-near)/num_samples  
+        random_shift = jax.random.uniform(key, (origin.shape[0], num_samples)) * (far-near)/num_samples  
         t = t+ random_shift 
 
     elif use_hvs:
 
-        t_to_sample = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
+        t_to_sample = jnp.broadcast_to(t, (origin.shape[0], num_samples))
 
         t = jnp.linspace(near, far, weights.shape[-2]) 
-        t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], weights.shape[-2]))
+        t = jnp.broadcast_to(t, (origin.shape[0], weights.shape[-2]))
 
         t = hvs(weights, t, t_to_sample, key)
         t = jax.lax.stop_gradient(t) 
 
     else:
-        t = jnp.broadcast_to(t, (origin.shape[0], origin.shape[1], num_samples))
+        t = jnp.broadcast_to(t, (origin.shape[0], num_samples))
 
 
     
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
     points = jnp.squeeze(points)
-    points_flatten = points.reshape((-1, 3))
-    encoded_x = encoding_func(points_flatten, L_position)
+    encoded_x = encoding_func(points, L_position)
     
+    rgb, opacity = model_func.apply(params, encoded_x) 
+    '''
     rgb_array, opacity_array = [], []
     for _cc in range(0, encoded_x.shape[0], 4096*1):
-        rgb, opacity = model_func.apply(params, encoded_x[_cc:_cc + 4096*1]) 
         rgb_array.append(rgb)
         opacity_array.append(opacity)
     
@@ -83,12 +95,12 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     
     rgb =rgb.reshape((points.shape[0], points.shape[1], t.shape[-1], 3))
     opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
-
+    '''
     rgb = jax.nn.sigmoid(rgb)
     opacity = jax.nn.relu(opacity) 
    
     t_delta = t[...,1:] - t[...,:-1]
-    t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], points.shape[1], 1])], 2)
+    t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], 1])], 1)
 
     
     T_i = jnp.cumsum(jnp.squeeze(opacity) * t_delta + 1e-10, -1)   
@@ -122,7 +134,7 @@ def get_model(L_position):
                 d = nn.Dense(1, name='fcd2')(z)
     
         z = nn.Dense(128, name='fc_128')(z)
-        
+        z = nn.relu(z) 
         z = nn.Dense(3, name='fc_f')(z)
         return z, d 
     
@@ -130,17 +142,17 @@ def get_model(L_position):
     params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
     return model, params
 
-def get_grad(model, params, data, render, render_hvs, use_hvs):
+def get_grad(params, data, render, render_hvs, use_hvs):
     origins, directions, y_target, key = data
     def loss_func(params):
-        image_pred, weights, ts = render(model, params, origins, directions, key)
+        image_pred, weights, ts = render(params, origins, directions, key)
 
         if not use_hvs:
             return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights, ts)
 
-        image_pred_hvs, weights_hvs, ts  = render_hvs(model, params, origins, directions, key, weights)
+        image_pred_hvs, weights_hvs, ts  = render_hvs(params, origins, directions, key, weights)
 
-        loss_hvs = jnp.mean((image_pred -  y_target) ** 2 )+ jnp.mean((image_pred_hvs -  y_target) ** 2)
+        loss_hvs =  jnp.mean((image_pred -  y_target) ** 2 + (image_pred_hvs -  y_target) ** 2)
         return loss_hvs, (image_pred_hvs, weights, ts)
 
     (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
@@ -171,20 +183,21 @@ def get_nerf_componets(config):
 
     
     # render function for training with random sampling
-    render_concrete = lambda model_func, params, origin, direction, key: \
-        render(model_func, params, origin, direction, key, near, far, num_samples, L_position, True, False, None)
+    render_concrete = lambda params, origin, direction, key: \
+        render(model, params, origin, direction, key, near, far, num_samples, L_position, True, False, None)
 
     # render function for training with Hierarchical volume sampling (hvs) 
-    render_concrete_hvs = lambda model_func, params, origin, direction, key, weights: \
-        render(model_func, params, origin, direction, key, near, far, hvs_num_samples, L_position, False, True, weights)
+    render_concrete_hvs = lambda params, origin, direction, key, weights: \
+        render(model, params, origin, direction, key, near, far, hvs_num_samples, L_position, False, True, weights)
 
-    
+    render_concrete = jax.jit(render_concrete) 
+    render_concrete_hvs = jax.jit(render_concrete_hvs) 
     # render function for evaluation
-    render_concrete_eval = lambda model_func, params, origin, direction: \
-        render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False, False, None)
-       
-    grad_fn = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
-
+    #render_concrete_eval = lambda model_func, params, origin, direction: \
+    #    render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False, False, None)
+    #   
+    grad_fn = lambda params, data: get_grad(params, data, render_concrete, render_concrete_hvs, use_hvs)
+    
     if config['split_to_patches']: 
         grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
         grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
@@ -205,7 +218,8 @@ def get_nerf_componets(config):
  
     model_components = {
         'model': model,
-        'render_eval_fn': render_concrete_eval,
+        'render_fn': render_concrete,
+        'render_hvs_fn': render_concrete_hvs,
         'grad_fn': grad_fn,
         'state': state,
     }

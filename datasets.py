@@ -4,8 +4,9 @@ import os
 import json 
 import cv2
 from dataclasses import dataclass, field
-from typing import List 
+from typing import List, Any
 import numpy as np
+import time
 
 
 def get_rays(H, W, focal, pose):
@@ -45,26 +46,41 @@ class Dataset:
     split_to_patch: bool
     split_w: int
     split_h: int
+    mini_batch_size: int = 1024 
     batch_size: int = 1
     use_batch: bool = False
     max_eval: int = 2 
     imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
     poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
+    key: Any = field(default=jax.random.PRNGKey(0)) 
+
+
+    def get(self, idx):
+        img = self.imgs[idx]
+        pose = self.poses[idx]
+        origins, directions = self.get_rays_jit(self.poses[idx])
+
+        return img, origins, directions
         
+
     def __iter__(self):
         self.n = 0
         return self 
 
     def __next__(self):
+        tic = time.perf_counter()
         if self.n > self.max_eval and self.subset == 'val':
             raise StopIteration 
-
+         
         if self.n < len(self.imgs):
             img_batch, origins_batch, directions_batch = [], [], []
             for _ in range(self.batch_size): 
                 if self.n not in self.cache:
-                    origins, directions = self.get_rays_jit(self.poses[self.n])
-                    img = self.imgs[self.n]
+                    img, origins, directions = self.get(self.n)
+                    origins = origins.reshape((-1, 3))
+                    directions = directions.reshape((-1, 3))
+                    img = img.reshape((-1, 3))
+
                     if self.split_to_patch: 
                         img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
                             for data in [img, origins, directions] ]
@@ -72,12 +88,22 @@ class Dataset:
                     self.cache[self.n] = [origins, directions, img]
                 else:
                     origins, directions, img = self.cache[self.n]
+
+                rand_idx = jax.random.randint(self.key, (self.mini_batch_size, 1), 0, len(img)) 
+                rand_idx = jnp.squeeze(rand_idx)
+
+                img = img[rand_idx]
+                origins = origins[rand_idx]
+                directions = directions[rand_idx]
+
                 img_batch.append(img)
                 origins_batch.append(origins)
                 directions_batch.append(directions)
                 
                 self.n += 1
-             
+                self.key, _ = jax.random.split(self.key)
+            toc = time.perf_counter()
+            print(f"getting one batch took {toc - tic:0.4f} seconds")
             return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
         else:
             raise StopIteration
@@ -268,13 +294,14 @@ def dataset_factory(config):
 
 if __name__ == '__main__':
     import yaml
-    with open('configs/lego.yaml') as file:
+    with open('configs/fern.yaml') as file:
         config = yaml.safe_load(file)
 
     dataset = LLFF(config=config) 
+    print(dataset)
 
-    #for a in dataset:
-    #    print(a)
+    for a in dataset:
+        print(a[0].shape)
     
      
     
