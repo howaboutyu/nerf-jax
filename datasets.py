@@ -46,6 +46,9 @@ class Dataset:
     split_to_patch: bool
     split_w: int
     split_h: int
+    near: float
+    far: float
+    split_frac: float = 0.9 
     mini_batch_size: int = 1024 
     batch_size: int = 1
     use_batch: bool = False
@@ -68,45 +71,54 @@ class Dataset:
         return self 
 
     def __next__(self):
-        tic = time.perf_counter()
-        if self.n > self.max_eval and self.subset == 'val':
-            raise StopIteration 
-         
-        if self.n < len(self.imgs):
-            img_batch, origins_batch, directions_batch = [], [], []
-            for _ in range(self.batch_size): 
-                if self.n not in self.cache:
-                    img, origins, directions = self.get(self.n)
-                    origins = origins.reshape((-1, 3))
-                    directions = directions.reshape((-1, 3))
-                    img = img.reshape((-1, 3))
-
-                    if self.split_to_patch: 
-                        img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
-                            for data in [img, origins, directions] ]
-    
-                    self.cache[self.n] = [origins, directions, img]
-                else:
-                    origins, directions, img = self.cache[self.n]
-
-                rand_idx = jax.random.randint(self.key, (self.mini_batch_size, 1), 0, len(img)) 
-                rand_idx = jnp.squeeze(rand_idx)
-
-                img = img[rand_idx]
-                origins = origins[rand_idx]
-                directions = directions[rand_idx]
-
-                img_batch.append(img)
-                origins_batch.append(origins)
-                directions_batch.append(directions)
-                
+        if self.subset == 'render':
+            if self.n < len(self.poses):
                 self.n += 1
-                self.key, _ = jax.random.split(self.key)
-            toc = time.perf_counter()
-            print(f"getting one batch took {toc - tic:0.4f} seconds")
-            return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
+                pose = self.poses[self.n]
+                origins, directions = self.get_rays_jit(pose)
+                return origins, directions 
+            else:
+                return StopIteration
         else:
-            raise StopIteration
+            tic = time.perf_counter()
+            if self.n > self.max_eval and self.subset == 'val':
+                raise StopIteration 
+             
+            if self.n < len(self.imgs):
+                img_batch, origins_batch, directions_batch = [], [], []
+                for _ in range(self.batch_size): 
+                    if self.n not in self.cache:
+                        img, origins, directions = self.get(self.n)
+                        origins = origins.reshape((-1, 3))
+                        directions = directions.reshape((-1, 3))
+                        img = img.reshape((-1, 3))
+    
+                        if self.split_to_patch: 
+                            img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
+                                for data in [img, origins, directions] ]
+        
+                        self.cache[self.n] = [origins, directions, img]
+                    else:
+                        origins, directions, img = self.cache[self.n]
+    
+                    rand_idx = jax.random.randint(self.key, (self.mini_batch_size, 1), 0, len(img)) 
+                    rand_idx = jnp.squeeze(rand_idx)
+    
+                    img = img[rand_idx]
+                    origins = origins[rand_idx]
+                    directions = directions[rand_idx]
+    
+                    img_batch.append(img)
+                    origins_batch.append(origins)
+                    directions_batch.append(directions)
+                    
+                    self.n += 1
+                    self.key, _ = jax.random.split(self.key)
+                toc = time.perf_counter()
+                print(f"getting one batch took {toc - tic:0.4f} seconds")
+                return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
+            else:
+                raise StopIteration
         
 
 
@@ -171,9 +183,9 @@ class LLFF(Dataset):
     most of this is from: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
     '''
     
-    def __init__(self, config, data_path='nerf_llff_data/fern', subset='train'):
-        
-        self.data_path = data_path
+    def __init__(self, config, subset='train'):
+         
+        self.data_path =config['data_path'] 
         
         self.normalizer = lambda x : x/255.
                 
@@ -188,16 +200,18 @@ class LLFF(Dataset):
             self.batch_size = jax.local_device_count() 
             print(f'Using batch mode with {self.batch_size} local devices')
 
+        self.subset = subset 
+
         self.get_raw_data()
         
         self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
         
         self.cache = dict() 
 
-        self.subset = subset 
 
 
     def get_raw_data(self):
+        
         img_paths = sorted(os.listdir(os.path.join(self.data_path, 'images')))
 
         images = np.array([self.normalizer(cv2.imread(os.path.join(self.data_path, 'images',  ip))) for ip in img_paths])
@@ -231,13 +245,29 @@ class LLFF(Dataset):
         # Recenter poses.
         poses = self._recenter_poses(poses)
 
-        self.imgs = images
-        self.poses = poses[:, :3, :4]
         self.focal = poses[0, -1, -1]
+        
+        sample_n = int(len(images) * self.split_frac)
+        if self.subset == 'train':
+            self.imgs = images[:sample_n]
+            self.poses = poses[:, :3, :4][:sample_n]
+        elif self.subset == 'val':
+            self.imgs = images[sample_n:]
+            self.poses = poses[:, :3, :4][sample_n:]
+        else:
+            self.imgs = images
+            self.poses = poses[:, :3, :4]
 
         self.H, self.W = images.shape[1:3]
 
+        self.near = np.min(bds) * .9
+        self.far = np.max(bds) * 1.
+
         print('focal ', self.focal)
+
+
+        if self.subset == 'render':
+            self.poses = self._generate_spherical_poses(self.poses, bds)
 
     def _recenter_poses(self, poses):
         """Recenter poses according to the original NeRF code."""
@@ -274,8 +304,66 @@ class LLFF(Dataset):
         """Normalization helper function."""
         return x / np.linalg.norm(x)
 
-        
-
+    
+    def _generate_spherical_poses(self, poses, bds):
+        """Generate a 360 degree spherical path for rendering."""
+        # pylint: disable=g-long-lambda
+        p34_to_44 = lambda p: np.concatenate([
+            p,
+            np.tile(np.reshape(np.eye(4)[-1, :], [1, 1, 4]), [p.shape[0], 1, 1])
+        ], 1)
+        rays_d = poses[:, :3, 2:3]
+        rays_o = poses[:, :3, 3:4]
+    
+        def min_line_dist(rays_o, rays_d):
+          a_i = np.eye(3) - rays_d * np.transpose(rays_d, [0, 2, 1])
+          b_i = -a_i @ rays_o
+          pt_mindist = np.squeeze(-np.linalg.inv(
+              (np.transpose(a_i, [0, 2, 1]) @ a_i).mean(0)) @ (b_i).mean(0))
+          return pt_mindist
+    
+        pt_mindist = min_line_dist(rays_o, rays_d)
+        center = pt_mindist
+        up = (poses[:, :3, 3] - center).mean(0)
+        vec0 = self._normalize(up)
+        vec1 = self._normalize(np.cross([.1, .2, .3], vec0))
+        vec2 = self._normalize(np.cross(vec0, vec1))
+        pos = center
+        c2w = np.stack([vec1, vec2, vec0, pos], 1)
+        poses_reset = (
+            np.linalg.inv(p34_to_44(c2w[None])) @ p34_to_44(poses[:, :3, :4]))
+        rad = np.sqrt(np.mean(np.sum(np.square(poses_reset[:, :3, 3]), -1)))
+        sc = 1. / rad
+        poses_reset[:, :3, 3] *= sc
+        bds *= sc
+        rad *= sc
+        centroid = np.mean(poses_reset[:, :3, 3], 0)
+        zh = centroid[2]
+        radcircle = np.sqrt(rad**2 - zh**2)
+        new_poses = []
+    
+        for th in np.linspace(0., 2. * np.pi, 120):
+          camorigin = np.array([radcircle * np.cos(th), radcircle * np.sin(th), zh])
+          up = np.array([0, 0, -1.])
+          vec2 = self._normalize(camorigin)
+          vec0 = self._normalize(np.cross(vec2, up))
+          vec1 = self._normalize(np.cross(vec2, vec0))
+          pos = camorigin
+          p = np.stack([vec0, vec1, vec2, pos], 1)
+          new_poses.append(p)
+    
+        new_poses = np.stack(new_poses, 0)
+        new_poses = np.concatenate([
+            new_poses,
+            np.broadcast_to(poses[0, :3, -1:], new_poses[:, :3, -1:].shape)
+        ], -1)
+        poses_reset = np.concatenate([
+            poses_reset[:, :3, :4],
+            np.broadcast_to(poses[0, :3, -1:], poses_reset[:, :3, -1:].shape)
+        ], -1)
+        return poses_reset 
+        return new_poses 
+    
        
         
 def dataset_factory(config):
@@ -286,22 +374,20 @@ def dataset_factory(config):
             'test': LegoDataset(config, subset='test'),
         }
 
-    elif config['dataset_name'] == 'fern':
+    elif config['data_type'] == 'llff':
         return {
             'train': LLFF(config, subset='train'),
             'val': LLFF(config, subset='val'),
+            'render': LLFF(config, subset='render'),
         }
 
 if __name__ == '__main__':
     import yaml
-    with open('configs/fern.yaml') as file:
+    with open('configs/beer.yaml') as file:
         config = yaml.safe_load(file)
 
-    dataset = LLFF(config=config) 
-    print(dataset)
+    dataset = LLFF(config=config, subset='render') 
 
-    for a in dataset:
-        print(a[0].shape)
-    
-     
+    for p in dataset.poses:
+        print(p.shape)
     
