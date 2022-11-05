@@ -3,8 +3,13 @@ build:
 	sudo docker build . -t jax-gpu -f Dockerfile.gpu
 
 
-start:
+get_mini_nerf_data:
 	wget https://people.eecs.berkeley.edu/~bmild/nerf/tiny_nerf_data.npz
+
+get_nerf_example_data:
+	wget http://cseweb.ucsd.edu/~viscomp/projects/LF/papers/ECCV20/nerf/nerf_example_data.zip
+
+start:
 	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest bash
 
 train_lego:
