@@ -1,3 +1,8 @@
+'''
+Datasets for nerf
+Many functions are taken from: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
+'''
+
 import jax
 import jax.numpy as jnp 
 import os
@@ -28,24 +33,11 @@ def get_rays(H, W, focal, pose):
 
     return origin, direction 
 
-def split2patches(data, n_w, n_h):
-    patches_array = jnp.hsplit(data, n_h) 
-    patches_array = jnp.array([jnp.vsplit(p, n_w) for p in patches_array])
-    patches = jnp.concatenate(patches_array)
-    return patches
-
-def patches2data(img, n_v):
-    data = jnp.hstack([jnp.vstack(s) for s in jnp.split(img, n_v)])
-    return data
-
 @dataclass
 class Dataset:    
     W: float    
     H: float
     focal: float
-    split_to_patch: bool
-    split_w: int
-    split_h: int
     near: float
     far: float
     split_frac: float = 0.9 
@@ -93,10 +85,6 @@ class Dataset:
                         directions = directions.reshape((-1, 3))
                         img = img.reshape((-1, 3))
     
-                        if self.split_to_patch: 
-                            img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
-                                for data in [img, origins, directions] ]
-        
                         self.cache[self.n] = [origins, directions, img]
                     else:
                         origins, directions, img = self.cache[self.n]
@@ -257,10 +245,7 @@ class LegoDataset(Dataset):
                 
         self.scale = config['scale'] 
         
-        self.split_w = config['split_w']
-        self.split_h = config['split_h']
 
-        self.split_to_patch = config['split_to_patches']
 
         if config['use_batch']:
             self.batch_size = jax.local_device_count() 
@@ -314,7 +299,6 @@ class LegoDataset(Dataset):
 
 class LLFF(Dataset): 
     '''
-    most of this is from: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
     '''
     
     def __init__(self, config, subset='train'):
@@ -325,11 +309,6 @@ class LLFF(Dataset):
                 
         self.scale = config['scale'] 
         
-        self.split_w = config['split_w']
-        self.split_h = config['split_h']
-
-        self.split_to_patch = config['split_to_patches']
-
         if config['use_batch']:
             self.batch_size = jax.local_device_count() 
             print(f'Using batch mode with {self.batch_size} local devices')
@@ -350,12 +329,9 @@ class LLFF(Dataset):
 
         images = np.array([self.normalizer(cv2.imread(os.path.join(self.data_path, 'images',  ip))) for ip in img_paths])
 
-
         if self.scale: 
             images = np.array([cv2.resize(img, dsize=None, fx=self.scale, fy=self.scale) for img in images])
 
-
-        
         poses_arr = np.load(os.path.join(self.data_path, 'poses_bounds.npy'))
 
         poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
