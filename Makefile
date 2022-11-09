@@ -15,6 +15,11 @@ start:
 train_lego:
 	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest python3 train.py
 
+llff_pose_from_vid:
+	echo 'let.s get it'
+	git clone https://github.com/Fyusion/LLFF
+	sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash
+
 
 create_tpu_vm:
 	gcloud compute tpus tpu-vm create nerf \
