@@ -15,13 +15,14 @@ from nerf import get_nerf_componets
 from datasets import dataset_factory, patches2data
 
 # TODO: add input args 
-with open('configs/fern.yaml') as file:
+with open('configs/beer.yaml') as file:
   config = yaml.safe_load(file)
 
 ckpt_dir = config['ckpt_dir'] 
 print('-----------------')
 dataset = dataset_factory(config) 
 
+config.update({'near': dataset['train'].near, 'far': dataset['train'].far})
 nerf_components = get_nerf_componets(config)
 
 state = nerf_components['state']
@@ -74,7 +75,7 @@ def val_step(data, state, H, W):
 
 for i in range(config['num_epochs']):
     if i % 10 == 0 and i > 0:    
-        pred_img = val_step(dataset['train'].get(0), state, dataset['train'].H, dataset['train'].W)
+        pred_img = val_step(dataset['val'].get(0), state, dataset['train'].H, dataset['train'].W)
         cv2.imwrite(f'/tmp/eval_{i}.jpg', np.array(pred_img * 255))
 
         checkpoints.save_checkpoint(ckpt_dir=ckpt_dir, target=state, step=i, overwrite=True)
