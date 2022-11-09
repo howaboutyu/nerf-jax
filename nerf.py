@@ -97,8 +97,12 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
     '''
     rgb = jax.nn.sigmoid(rgb)
-    opacity = jax.nn.relu(opacity) 
+    
+    if rand:
+        opacity = opacity + jax.random.normal(key, opacity.shape, dtype=opacity.dtype) 
    
+    opacity = jax.nn.relu(opacity) 
+
     t_delta = t[...,1:] - t[...,:-1]
     t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], 1])], 1)
 
@@ -173,9 +177,10 @@ def get_patches_grads(grad_fn, params, data):
 
 def get_nerf_componets(config):
     model, params = get_model(config['L_position'])
+
+    near = config['near']
+    far = config['far']
     
-    near = config['near'] 
-    far = config['far'] 
     num_samples = config['num_samples'] 
     use_hvs = config['use_hvs']
     hvs_num_samples = config['hvs_num_samples'] 
