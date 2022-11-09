@@ -39,7 +39,8 @@ def hvs(weights, t, t_to_sample, key):
         sampled_t = jnp.take_along_axis(t_to_sample, argmin, -1)
         return sampled_t
 
-
+    
+    # TODO: currently it is assuming that len(t)//2 = len(t_to_sample), like in the paper
     Z = jax.random.uniform(key, t_to_sample.shape)
 
     key, _ = jax.random.split(key)
@@ -48,13 +49,8 @@ def hvs(weights, t, t_to_sample, key):
     Z = jax.random.uniform(key, t_to_sample.shape)
     sampled_t2 = inverse_sample(Z)
 
-    #jax.debug.breakpoint()
-    #jax.debug.print('max argmin  : {}', jnp.max(argmin))
-    #jax.debug.print('sampled t : {}', sampled_t[0, :])
-    #jax.debug.print('argmin  : {}', argmin[0,:])
     new_t = jnp.concatenate([sampled_t1, sampled_t2, t], -1)
     new_t = jnp.sort(new_t, -1)
-    #jax.debug.print('hvs t shape: {}', new_t.shape)
     return new_t 
 
 def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
@@ -84,18 +80,7 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     encoded_x = encoding_func(points, L_position)
     
     rgb, opacity = model_func.apply(params, encoded_x) 
-    '''
-    rgb_array, opacity_array = [], []
-    for _cc in range(0, encoded_x.shape[0], 4096*1):
-        rgb_array.append(rgb)
-        opacity_array.append(opacity)
-    
-    rgb = jnp.concatenate(rgb_array, 0)
-    opacity = jnp.concatenate(opacity_array, 0)
-    
-    rgb =rgb.reshape((points.shape[0], points.shape[1], t.shape[-1], 3))
-    opacity =opacity.reshape((points.shape[0], points.shape[1], t.shape[-1], 1))
-    '''
+
     rgb = jax.nn.sigmoid(rgb)
     
     if rand:
@@ -163,17 +148,6 @@ def get_grad(params, data, render, render_hvs, use_hvs):
     return loss_val, grads, image_pred, weights, ts
 
 
-def get_patches_grads(grad_fn, params, data):
-    # this function is implemented for GPUs with low memory
-    origins, directions, y_targets, keys = data
-    loss_array, grads_array, pred_train_array, weights_array, t_array = jax.lax.map(
-        lambda grad_input : \
-            grad_fn(params, grad_input), (origins, directions, y_targets, keys)
-        )
-    grads = jax.tree_map(lambda x : jnp.mean(x, 0), grads_array)
-
-    loss_val = jnp.mean(loss_array)
-    return loss_val, grads, pred_train_array, weights_array, t_array
 
 def get_nerf_componets(config):
     model, params = get_model(config['L_position'])
@@ -197,17 +171,10 @@ def get_nerf_componets(config):
 
     render_concrete = jax.jit(render_concrete) 
     render_concrete_hvs = jax.jit(render_concrete_hvs) 
-    # render function for evaluation
-    #render_concrete_eval = lambda model_func, params, origin, direction: \
-    #    render(model_func, params, origin, direction, None, near, far, num_samples, L_position, False, False, None)
-    #   
+
     grad_fn = lambda params, data: get_grad(params, data, render_concrete, render_concrete_hvs, use_hvs)
     
-    if config['split_to_patches']: 
-        grad_fn_entire = lambda params, data: get_grad(model, params, data, render_concrete, render_concrete_hvs, use_hvs)
-        grad_fn = lambda params, data : get_patches_grads(grad_fn_entire, params, data)
-    
-    
+   
     learning_rate = config['init_lr'] 
     
     # create train state
