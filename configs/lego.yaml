@@ -3,14 +3,14 @@ dataset_name: lego
 near: 2.
 far: 6.
 
-split_to_patches: True 
+split_to_patches: False 
 scale: 0.125
 split_w: 2
 split_h: 2
 num_samples: 64 
 
 use_hvs: True 
-hvs_num_samples: 64 
+hvs_num_samples: 128 
 
 # batch size will be equal to jax.local_device_count() 
 # so setting this to true with only one device will be the same

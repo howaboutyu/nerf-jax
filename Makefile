@@ -3,12 +3,23 @@ build:
 	sudo docker build . -t jax-gpu -f Dockerfile.gpu
 
 
-start:
+get_mini_nerf_data:
 	wget https://people.eecs.berkeley.edu/~bmild/nerf/tiny_nerf_data.npz
+
+get_nerf_example_data:
+	wget http://cseweb.ucsd.edu/~viscomp/projects/LF/papers/ECCV20/nerf/nerf_example_data.zip
+	unzip nerf_example_data.zip
+
+start:
 	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest bash
 
 train_lego:
 	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest python3 train.py
+
+llff_pose_from_vid:
+	echo 'let.s get it'
+	git clone https://github.com/Fyusion/LLFF
+	sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash
 
 
 create_tpu_vm:

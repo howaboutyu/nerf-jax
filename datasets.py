@@ -1,11 +1,17 @@
+'''
+Datasets for nerf
+Many functions are taken from: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
+'''
+
 import jax
 import jax.numpy as jnp 
 import os
 import json 
 import cv2
 from dataclasses import dataclass, field
-from typing import List 
+from typing import List, Any
 import numpy as np
+import time
 
 
 def get_rays(H, W, focal, pose):
@@ -27,192 +33,81 @@ def get_rays(H, W, focal, pose):
 
     return origin, direction 
 
-def split2patches(data, n_w, n_h):
-    patches_array = jnp.hsplit(data, n_h) 
-    patches_array = jnp.array([jnp.vsplit(p, n_w) for p in patches_array])
-    patches = jnp.concatenate(patches_array)
-    return patches
-
-def patches2data(img, n_v):
-    data = jnp.hstack([jnp.vstack(s) for s in jnp.split(img, n_v)])
-    return data
-
 @dataclass
 class Dataset:    
     W: float    
     H: float
     focal: float
-    split_to_patch: bool
-    split_w: int
-    split_h: int
+    near: float
+    far: float
+    split_frac: float = 0.9 
+    mini_batch_size: int = 1024 
     batch_size: int = 1
     use_batch: bool = False
     max_eval: int = 2 
     imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
     poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
+    key: Any = field(default=jax.random.PRNGKey(0)) 
+
+
+    def get(self, idx):
+        img = self.imgs[idx]
+        pose = self.poses[idx]
+        origins, directions = self.get_rays_jit(self.poses[idx])
+
+        return img, origins, directions
         
+
     def __iter__(self):
         self.n = 0
         return self 
 
     def __next__(self):
-        if self.n > self.max_eval and self.subset == 'val':
-            raise StopIteration 
-
-        if self.n < len(self.imgs):
-            img_batch, origins_batch, directions_batch = [], [], []
-            for _ in range(self.batch_size): 
-                if self.n not in self.cache:
-                    origins, directions = self.get_rays_jit(self.poses[self.n])
-                    img = self.imgs[self.n]
-                    if self.split_to_patch: 
-                        img, origins, directions = [split2patches(data, self.split_w, self.split_h) \
-                            for data in [img, origins, directions] ]
-    
-                    self.cache[self.n] = [origins, directions, img]
-                else:
-                    origins, directions, img = self.cache[self.n]
-                img_batch.append(img)
-                origins_batch.append(origins)
-                directions_batch.append(directions)
-                
+        if self.subset == 'render':
+            if self.n < len(self.render_poses):
+                pose = self.render_poses[self.n]
+                origins, directions = self.get_rays_jit(pose)
                 self.n += 1
-             
-            return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
+                return origins, directions 
+            else:
+                raise StopIteration
         else:
-            raise StopIteration
-        
-
-
-class LegoDataset(Dataset): 
+            tic = time.perf_counter()
+            if self.n > self.max_eval and self.subset == 'val':
+                raise StopIteration 
+             
+            if self.n < len(self.imgs):
+                img_batch, origins_batch, directions_batch = [], [], []
+                for _ in range(self.batch_size): 
+                    if self.n not in self.cache:
+                        img, origins, directions = self.get(self.n)
+                        origins = origins.reshape((-1, 3))
+                        directions = directions.reshape((-1, 3))
+                        img = img.reshape((-1, 3))
     
-    def __init__(self, config, data_path='nerf_synthetic/lego', subset='train'):
-        
-        self.data_path = data_path
-        self.subset = subset 
-        
-        self.normalizer = lambda x : x/255.
-                
-        self.scale = config['scale'] 
-        
-        self.split_w = config['split_w']
-        self.split_h = config['split_h']
-
-        self.split_to_patch = config['split_to_patches']
-
-        if config['use_batch']:
-            self.batch_size = jax.local_device_count() 
-            print(f'Using batch mode with {self.batch_size} local devices')
-
-        self.get_raw_data()
-        
-        self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
-        
-        self.cache = dict() 
-
-
-    def get_raw_data(self):
-
-
-        json_p = os.path.join(self.data_path, f'transforms_{self.subset}.json')
-        
-        with open(json_p, 'r') as fp: 
-            transforms = json.load(fp)
-        
-        imgs, poses = [], [] 
-        for t in transforms['frames']:
-            img = cv2.imread(os.path.join(self.data_path, t['file_path'] + '.png'))
-            
-            if self.scale: img = cv2.resize(img, dsize=None, fx=self.scale, fy=self.scale)
-
-            pose = jnp.array(t['transform_matrix'])
-            imgs.append(self.normalizer(img))
-            poses.append(pose)
-
-        self.imgs = jnp.array(imgs) 
-        self.poses = jnp.array(poses)         
-
-        H, W = imgs[0].shape[:2]
-        camera_angle_x = float(transforms['camera_angle_x'])
-        focal = .5 * W / jnp.tan(.5 * camera_angle_x)
-        
-        self.H = H
-        self.W = W
-        self.focal = focal 
-
-class LLFF(Dataset): 
-    '''
-    most of this is from: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
-    '''
+                        self.cache[self.n] = [origins, directions, img]
+                    else:
+                        origins, directions, img = self.cache[self.n]
     
-    def __init__(self, config, data_path='nerf_llff_data/fern', subset='train'):
-        
-        self.data_path = data_path
-        
-        self.normalizer = lambda x : x/255.
-                
-        self.scale = config['scale'] 
-        
-        self.split_w = config['split_w']
-        self.split_h = config['split_h']
-
-        self.split_to_patch = config['split_to_patches']
-
-        if config['use_batch']:
-            self.batch_size = jax.local_device_count() 
-            print(f'Using batch mode with {self.batch_size} local devices')
-
-        self.get_raw_data()
-        
-        self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
-        
-        self.cache = dict() 
-
-        self.subset = subset 
-
-
-    def get_raw_data(self):
-        img_paths = sorted(os.listdir(os.path.join(self.data_path, 'images')))
-
-        images = np.array([self.normalizer(cv2.imread(os.path.join(self.data_path, 'images',  ip))) for ip in img_paths])
-
-
-        if self.scale: 
-            images = np.array([cv2.resize(img, dsize=None, fx=self.scale, fy=self.scale) for img in images])
-
-
-        
-        poses_arr = np.load(os.path.join(self.data_path, 'poses_bounds.npy'))
-
-        poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
-        bds = poses_arr[:, -2:].transpose([1, 0])
-
-        factor = 1./self.scale 
-        poses[:2, 4, :] = np.array(images.shape[:2]).reshape([2, 1])
-        poses[2, 4, :] = poses[2, 4, :] * 1. / factor
-
-
-        poses = np.concatenate(
-            [poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1)
-        poses = np.moveaxis(poses, -1, 0).astype(np.float32)
-        bds = np.moveaxis(bds, -1, 0).astype(np.float32)
+                    rand_idx = jax.random.randint(self.key, (self.mini_batch_size, 1), 0, len(img)) 
+                    rand_idx = jnp.squeeze(rand_idx)
     
-        # Rescale according to a default bd factor.
-        scale = 1. / (bds.min() * .75)
-        poses[:, :3, 3] *= scale
-        bds *= scale
+                    img = img[rand_idx]
+                    origins = origins[rand_idx]
+                    directions = directions[rand_idx]
     
-        # Recenter poses.
-        poses = self._recenter_poses(poses)
-
-        self.imgs = images
-        self.poses = poses[:, :3, :4]
-        self.focal = poses[0, -1, -1]
-
-        self.H, self.W = images.shape[1:3]
-
-        print('focal ', self.focal)
-
+                    img_batch.append(img)
+                    origins_batch.append(origins)
+                    directions_batch.append(directions)
+                    
+                    self.n += 1
+                    self.key, _ = jax.random.split(self.key)
+                toc = time.perf_counter()
+                print(f"getting one batch took {toc - tic:0.4f} seconds")
+                return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
+            else:
+                raise StopIteration
+        
     def _recenter_poses(self, poses):
         """Recenter poses according to the original NeRF code."""
         poses_ = poses.copy()
@@ -248,33 +143,268 @@ class LLFF(Dataset):
         """Normalization helper function."""
         return x / np.linalg.norm(x)
 
+    
+    def _generate_spherical_poses(self, poses, bds):
+        """Generate a 360 degree spherical path for rendering."""
+        # pylint: disable=g-long-lambda
+        p34_to_44 = lambda p: np.concatenate([
+            p,
+            np.tile(np.reshape(np.eye(4)[-1, :], [1, 1, 4]), [p.shape[0], 1, 1])
+        ], 1)
+        rays_d = poses[:, :3, 2:3]
+        rays_o = poses[:, :3, 3:4]
+    
+        def min_line_dist(rays_o, rays_d):
+          a_i = np.eye(3) - rays_d * np.transpose(rays_d, [0, 2, 1])
+          b_i = -a_i @ rays_o
+          pt_mindist = np.squeeze(-np.linalg.inv(
+              (np.transpose(a_i, [0, 2, 1]) @ a_i).mean(0)) @ (b_i).mean(0))
+          return pt_mindist
+    
+        pt_mindist = min_line_dist(rays_o, rays_d)
+        center = pt_mindist
+        up = (poses[:, :3, 3] - center).mean(0)
+        vec0 = self._normalize(up)
+        vec1 = self._normalize(np.cross([.1, .2, .3], vec0))
+        vec2 = self._normalize(np.cross(vec0, vec1))
+        pos = center
+        c2w = np.stack([vec1, vec2, vec0, pos], 1)
+        poses_reset = (
+            np.linalg.inv(p34_to_44(c2w[None])) @ p34_to_44(poses[:, :3, :4]))
+        rad = np.sqrt(np.mean(np.sum(np.square(poses_reset[:, :3, 3]), -1)))
+        sc = 1. / rad
+        poses_reset[:, :3, 3] *= sc
+        bds *= sc
+        rad *= sc
+        centroid = np.mean(poses_reset[:, :3, 3], 0)
+        zh = centroid[2]
+        radcircle = np.sqrt(rad**2 - zh**2)
+        new_poses = []
+    
+        for th in np.linspace(0., 2. * np.pi, 120):
+          camorigin = np.array([radcircle * np.cos(th), radcircle * np.sin(th), zh])
+          up = np.array([0, 0, -1.])
+          vec2 = self._normalize(camorigin)
+          vec0 = self._normalize(np.cross(vec2, up))
+          vec1 = self._normalize(np.cross(vec2, vec0))
+          pos = camorigin
+          p = np.stack([vec0, vec1, vec2, pos], 1)
+          new_poses.append(p)
+    
+        new_poses = np.stack(new_poses, 0)
+        new_poses = np.concatenate([
+            new_poses,
+            np.broadcast_to(poses[0, :3, -1:], new_poses[:, :3, -1:].shape)
+        ], -1)
+        poses_reset = np.concatenate([
+            poses_reset[:, :3, :4],
+            np.broadcast_to(poses[0, :3, -1:], poses_reset[:, :3, -1:].shape)
+        ], -1)
+        return poses_reset 
+        return new_poses 
+    
+    def _generate_spiral_poses(self, poses, bds):
+        """Generate a spiral path for rendering."""
+        c2w = self._poses_avg(poses)
+        # Get average pose.
+        up = self._normalize(poses[:, :3, 1].sum(0))
+        # Find a reasonable "focus depth" for this dataset.
+        close_depth, inf_depth = bds.min() * .9, bds.max() * 5.
+        dt = .75
+        mean_dz = 1. / (((1. - dt) / close_depth + dt / inf_depth))
+        focal = mean_dz
+        # Get radii for spiral path.
+        tt = poses[:, :3, 3]
+        rads = np.percentile(np.abs(tt), 90, 0)
+        c2w_path = c2w
+        n_views = 120
+        n_rots = 2
+        # Generate poses for spiral path.
+        render_poses = []
+        rads = np.array(list(rads) + [1.])
+        hwf = c2w_path[:, 4:5]
+        zrate = .5
+        for theta in np.linspace(0., 2. * np.pi * n_rots, n_views + 1)[:-1]:
+          c = np.dot(c2w[:3, :4], (np.array(
+              [np.cos(theta), -np.sin(theta), -np.sin(theta * zrate), 1.]) * rads))
+          z = self._normalize(c - np.dot(c2w[:3, :4], np.array([0, 0, -focal, 1.])))
+          render_poses.append(np.concatenate([self._viewmatrix(z, up, c), hwf], 1))
+        self.render_poses = np.array(render_poses).astype(np.float32)[:, :3, :4] 
+
+class LegoDataset(Dataset): 
+    
+    def __init__(self, config, data_path='nerf_synthetic/lego', subset='train'):
+        
+        self.data_path = data_path
+        self.subset = subset 
+        
+        self.normalizer = lambda x : x/255.
+
+        self.near = config['near']
+        self.far = config['far']
+                
+        self.scale = config['scale'] 
         
 
-       
+
+        if config['use_batch']:
+            self.batch_size = jax.local_device_count() 
+            print(f'Using batch mode with {self.batch_size} local devices')
+
+        self.get_raw_data()
+        
+        self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
+        
+        self.cache = dict() 
+
+
+    def get_raw_data(self):
+
+
+        json_p = os.path.join(self.data_path, f'transforms_{self.subset}.json')
+
+        if self.subset == 'render':
+
+            json_p = os.path.join(self.data_path, f'transforms_train.json')
+
+        
+        with open(json_p, 'r') as fp: 
+            transforms = json.load(fp)
+        
+        imgs, poses = [], [] 
+        for t in transforms['frames']:
+            img = cv2.imread(os.path.join(self.data_path, t['file_path'] + '.png'))
+            
+            if self.scale: img = cv2.resize(img, dsize=None, fx=self.scale, fy=self.scale)
+
+            pose = jnp.array(t['transform_matrix'])
+            imgs.append(self.normalizer(img))
+            poses.append(pose)
+
+        self.imgs = jnp.array(imgs) 
+        self.poses = jnp.array(poses)         
+
+        H, W = imgs[0].shape[:2]
+        camera_angle_x = float(transforms['camera_angle_x'])
+        focal = .5 * W / jnp.tan(.5 * camera_angle_x)
+        
+        self.H = H
+        self.W = W
+        self.focal = focal 
+
+        if self.subset == 'render':
+            self._generate_spiral_poses(self.poses, 1)
+
+
+
+class LLFF(Dataset): 
+    '''
+    '''
+    
+    def __init__(self, config, subset='train'):
+         
+        self.data_path =config['data_path'] 
+        
+        self.normalizer = lambda x : x/255.
+                
+        self.scale = config['scale'] 
+        
+        if config['use_batch']:
+            self.batch_size = jax.local_device_count() 
+            print(f'Using batch mode with {self.batch_size} local devices')
+
+        self.subset = subset 
+
+        self.get_raw_data()
+        
+        self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
+        
+        self.cache = dict() 
+
+
+
+    def get_raw_data(self):
+        
+        img_paths = sorted(os.listdir(os.path.join(self.data_path, 'images')))
+
+        images = np.array([self.normalizer(cv2.imread(os.path.join(self.data_path, 'images',  ip))) for ip in img_paths])
+
+        if self.scale: 
+            images = np.array([cv2.resize(img, dsize=None, fx=self.scale, fy=self.scale) for img in images])
+
+        poses_arr = np.load(os.path.join(self.data_path, 'poses_bounds.npy'))
+
+        poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
+        bds = poses_arr[:, -2:].transpose([1, 0])
+
+        factor = 1./self.scale 
+        poses[:2, 4, :] = np.array(images.shape[:2]).reshape([2, 1])
+        poses[2, 4, :] = poses[2, 4, :] * 1. / factor
+
+
+        poses = np.concatenate(
+            [poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1)
+        poses = np.moveaxis(poses, -1, 0).astype(np.float32)
+        bds = np.moveaxis(bds, -1, 0).astype(np.float32)
+    
+        # Rescale according to a default bd factor.
+        scale = 1. / (bds.min() * .75)
+        poses[:, :3, 3] *= scale
+        bds *= scale
+    
+        # Recenter poses.
+        poses = self._recenter_poses(poses)
+
+        if self.subset == 'render':
+            self._generate_spiral_poses(poses, bds)
+
+
+
+        self.focal = poses[0, -1, -1]
+        
+        sample_n = int(len(images) * self.split_frac)
+        if self.subset == 'train':
+            self.imgs = images[:sample_n]
+            self.poses = poses[:, :3, :4][:sample_n]
+        elif self.subset == 'val':
+            self.imgs = images[sample_n:]
+            self.poses = poses[:, :3, :4][sample_n:]
+        else:
+            self.imgs = images
+            self.poses = poses[:, :3, :4]
+
+        self.H, self.W = images.shape[1:3]
+
+        self.near = np.min(bds) * .9
+        self.far = np.max(bds) * 1.
+
+        print('focal ', self.focal)
+
+
+      
         
 def dataset_factory(config):
     if config['dataset_name'] == 'lego':
         return {
             'train': LegoDataset(config, subset='train'),
             'val': LegoDataset(config, subset='val'),
-            'test': LegoDataset(config, subset='test'),
+            'render': LegoDataset(config, subset='render'),
         }
 
-    elif config['dataset_name'] == 'fern':
+    elif config['data_type'] == 'llff':
         return {
             'train': LLFF(config, subset='train'),
             'val': LLFF(config, subset='val'),
+            'render': LLFF(config, subset='render'),
         }
 
 if __name__ == '__main__':
     import yaml
-    with open('configs/lego.yaml') as file:
+    with open('configs/beer.yaml') as file:
         config = yaml.safe_load(file)
 
-    dataset = LLFF(config=config) 
+    dataset = LLFF(config=config, subset='render') 
 
-    #for a in dataset:
-    #    print(a)
-    
-     
+    for p in dataset.poses:
+        print(p.shape)
     
