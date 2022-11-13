@@ -8,7 +8,7 @@ from typing import Any
 
 
 def encoding_func(x, L):
-    encoded_array = []
+    encoded_array = [x]
     for i in range(L):
         encoded_array.extend([jnp.sin(2. ** i * jnp.pi * x), jnp.cos(2. ** i * jnp.pi * x)])
     return jnp.concatenate(encoded_array, -1)
@@ -115,7 +115,7 @@ def get_model(L_position, L_direction):
       def __call__(self, z, direction):
         input = z
     
-        for i in range(8):
+        for i in range(9):
             z = nn.Dense(256, name=f'fc{i}')(z)
             z = nn.relu(z)
             if i == 4:
@@ -124,8 +124,7 @@ def get_model(L_position, L_direction):
             if i == 7: 
                 d = nn.Dense(1, name='fcd2')(z)
 
-        if L_direction:
-            z = jnp.concatenate([z, direction], -1)
+        if L_direction: z = jnp.concatenate([z, direction], -1)
 
         z = nn.Dense(128, name='fc_128')(z)
         z = nn.relu(z) 
@@ -135,9 +134,9 @@ def get_model(L_position, L_direction):
     model = Model()
 
     if not L_direction:
-        params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 )))
+        params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
     else:
-        params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 )), jnp.ones((1, L_direction * 6 )))
+        params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)), jnp.ones((1, L_direction * 6 + 3)))
 
     return model, params
 
