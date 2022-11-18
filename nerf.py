@@ -53,7 +53,7 @@ def hvs(weights, t, t_to_sample, key):
     new_t = jnp.sort(new_t, -1)
     return new_t 
 
-def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, rand, use_hvs, weights):
+def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, L_direction, rand, use_hvs, weights):
     t = jnp.linspace(near, far, num_samples) 
 
     if rand: 
@@ -76,10 +76,14 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
 
     
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
-    points = jnp.squeeze(points)
     encoded_x = encoding_func(points, L_position)
-    
-    rgb, opacity = model_func.apply(params, encoded_x) 
+
+    if L_direction:
+        direction = jnp.broadcast_to(direction[..., jnp.newaxis, :], points.shape)
+        encoded_dir = encoding_func(direction, L_direction)
+        rgb, opacity = model_func.apply(params, encoded_x, encoded_dir) 
+    else: 
+        rgb, opacity = model_func.apply(params, encoded_x) 
 
     rgb = jax.nn.sigmoid(rgb)
     
@@ -104,16 +108,14 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     return c_sum, weights, t
 
 
-def get_model(L_position):
+def get_model(L_position, L_direction):
     class Model(nn.Module):
-    
+
       @nn.compact
-      def __call__(self, z):
+      def __call__(self, z, direction):
         input = z
-        z = nn.Dense(L_position*6+3, name='fc_in')(z)
-        z = nn.relu(z)
     
-        for i in range(8):
+        for i in range(9):
             z = nn.Dense(256, name=f'fc{i}')(z)
             z = nn.relu(z)
             if i == 4:
@@ -121,14 +123,21 @@ def get_model(L_position):
     
             if i == 7: 
                 d = nn.Dense(1, name='fcd2')(z)
-    
+
+        if L_direction: z = jnp.concatenate([z, direction], -1)
+
         z = nn.Dense(128, name='fc_128')(z)
         z = nn.relu(z) 
         z = nn.Dense(3, name='fc_f')(z)
         return z, d 
     
     model = Model()
-    params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
+
+    if not L_direction:
+        params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
+    else:
+        params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)), jnp.ones((1, L_direction * 6 + 3)))
+
     return model, params
 
 def get_grad(params, data, render, render_hvs, use_hvs):
@@ -150,7 +159,6 @@ def get_grad(params, data, render, render_hvs, use_hvs):
 
 
 def get_nerf_componets(config):
-    model, params = get_model(config['L_position'])
 
     near = config['near']
     far = config['far']
@@ -159,15 +167,18 @@ def get_nerf_componets(config):
     use_hvs = config['use_hvs']
     hvs_num_samples = config['hvs_num_samples'] 
     L_position = config['L_position']
+    L_direction = config['L_direction'] if 'L_direction' in config else None
 
-    
+ 
+    model, params = get_model(config['L_position'], L_direction)
+
     # render function for training with random sampling
     render_concrete = lambda params, origin, direction, key: \
-        render(model, params, origin, direction, key, near, far, num_samples, L_position, True, False, None)
+        render(model, params, origin, direction, key, near, far, num_samples, L_position, L_direction, True, False, None)
 
     # render function for training with Hierarchical volume sampling (hvs) 
     render_concrete_hvs = lambda params, origin, direction, key, weights: \
-        render(model, params, origin, direction, key, near, far, hvs_num_samples, L_position, False, True, weights)
+        render(model, params, origin, direction, key, near, far, hvs_num_samples, L_position, L_direction, False, True, weights)
 
     render_concrete = jax.jit(render_concrete) 
     render_concrete_hvs = jax.jit(render_concrete_hvs) 

@@ -1,9 +1,8 @@
-dataset_name: lego
+dataset_name: beer 
+data_type: llff
+data_path: test2
 
-near: 2.
-far: 6.
-
-scale: 0.125
+scale: 0.35
 
 num_samples: 64 
 
@@ -16,9 +15,9 @@ hvs_num_samples: 128
 use_batch: True 
 
 L_position: 10 
-L_direction: 4 
+L_direction: 4
 
 num_epochs: 500000000
-init_lr: 5.e-5
+init_lr: 1.e-4
 
-ckpt_dir: 'ckpt_lego_dir'
+ckpt_dir: 'ckpt_beer_dir'

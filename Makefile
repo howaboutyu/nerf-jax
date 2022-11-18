@@ -18,9 +18,18 @@ train_lego:
 
 llff_pose_from_vid:
 	echo 'let.s get it'
-	git clone https://github.com/Fyusion/LLFF
-	sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash
 
+	#mkdir LLFF && cd LLFF && 
+	#git clone https://github.com/Fyusion/LLFF
+	#sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash
+
+vid_to_nerf:
+	echo 'Converting' $(VID_FILE)', the output will be in' $(OUT_PATH)
+	
+	mkdir -p $(OUT_PATH)/images
+	sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash -c \
+		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.jpg; \
+		python /nerf/LLFF/imgs2poses.py /nerf/$(OUT_PATH)"
 
 create_tpu_vm:
 	gcloud compute tpus tpu-vm create nerf \

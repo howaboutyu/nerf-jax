@@ -291,9 +291,8 @@ class LegoDataset(Dataset):
         self.H = H
         self.W = W
         self.focal = focal 
-
         if self.subset == 'render':
-            self._generate_spiral_poses(self.poses, 1)
+            self._generate_spiral_poses(self.poses, jnp.array([2., 6.]))
 
 
 
