@@ -65,12 +65,27 @@ vid_to_nerf:
 
 
 create_tpu_vm:
-	gcloud compute tpus tpu-vm create nerf \
+	# Setup 
+	-gcloud compute tpus tpu-vm create nerf \
 		--zone europe-west4-a \
 		--accelerator-type v3-8 \
 		--version tpu-vm-base \
 		--preemptible
+	
+	gcloud compute tpus tpu-vm scp --zone europe-west4-a scripts/setup_tpu.sh nerf:/tmp 
+	gcloud compute tpus tpu-vm ssh --zone europe-west4-a nerf --command 'bash /tmp/setup_tpu.sh'
 
+train_tpu:
+	
+	# Copy over config and data 
+	# config -> tpu
+	# nerf data -> tpu
+	gcloud compute tpus tpu-vm scp --zone europe-west4-a $(CONFIG_PATH) nerf:~/nerf/configs 
+	gcloud compute tpus tpu-vm scp --recurse --zone europe-west4-a $(DATA_PATH) nerf:~/nerf/llff_data
+
+	gcloud compute tpus tpu-vm scp --zone europe-west4-a scripts/setup_tpu.sh nerf:/tmp 
+	gcloud compute tpus tpu-vm ssh --zone europe-west4-a nerf --command \
+		'cd ~/nerf && tmux new-session -d -s nerf "python3 main.py --config_path=$(CONFIG_PATH) --mode=train"'
 
 start_tpu_vm:
 	gcloud compute tpus tpu-vm start nerf --zone europe-west4-a 
