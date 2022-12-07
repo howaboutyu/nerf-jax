@@ -23,13 +23,46 @@ llff_pose_from_vid:
 	#git clone https://github.com/Fyusion/LLFF
 	#sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash
 
+gcp_gpu_vm = 'gpu-instance-1'
+start_gpu_convert:
+	# create gpu vm and run setup scripts - install cuda, docker, nerf-jax repo
+	-gcloud compute instances create $(gcp_gpu_vm) \
+    --machine-type n1-standard-2 \
+    --zone us-east1-d \
+    --boot-disk-size 40GB \
+    --accelerator type=nvidia-tesla-k80,count=1 \
+    --image-family ubuntu-1804-lts \
+    --image-project ubuntu-os-cloud \
+    --maintenance-policy TERMINATE --restart-on-failure
+
+	gcloud compute scp scripts/setup_gpu.sh $(gcp_gpu_vm):/tmp
+	gcloud compute ssh $(gcp_gpu_vm) --command \
+		'bash /tmp/setup_gpu.sh' 
+
+delete_gpu_vm:
+	gcloud compute instances delete $(gcp_gpu_vm)
+
+vid_to_nerf_cloud:
+	# cloud vid -> nerf converter
+
+	echo Converting $(VID_FILE) on $(gcp_gpu_vm) the output will be in $(OUT_PATH)
+	gcloud compute scp $(VID_FILE) $(gcp_gpu_vm):~/nerf
+
+	gcloud compute ssh $(gcp_gpu_vm) --command \
+		"cd ~/nerf && sudo make vid_to_nerf VID_FILE=$(VID_FILE) OUT_PATH=$(OUT_PATH)"
+
+	gcloud compute scp --recurse $(gcp_gpu_vm):~/nerf/$(OUT_PATH) .
+
 vid_to_nerf:
+	# Local vid -> nerf converter
 	echo 'Converting' $(VID_FILE)', the output will be in' $(OUT_PATH)
 	
 	mkdir -p $(OUT_PATH)/images
-	sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash -c \
+	sudo docker run --gpus all -v`pwd`:/nerf -i bmild/tf_colmap bash -c \
 		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.jpg; \
 		python /nerf/LLFF/imgs2poses.py /nerf/$(OUT_PATH)"
+
+
 
 create_tpu_vm:
 	gcloud compute tpus tpu-vm create nerf \
@@ -37,6 +70,7 @@ create_tpu_vm:
 		--accelerator-type v3-8 \
 		--version tpu-vm-base \
 		--preemptible
+
 
 start_tpu_vm:
 	gcloud compute tpus tpu-vm start nerf --zone europe-west4-a 
@@ -54,5 +88,8 @@ setup_vm:
 delete_tpu_vm:
 	gcloud compute tpus tpu-vm delete nerf  --zone europe-west4-a
 
-list_tpu_vm:
+list_vm:
+	echo '############### TPU ##############'
 	gcloud compute tpus tpu-vm list --zone europe-west4-a
+	echo '############### GPU ##############'
+	gcloud compute instances list
