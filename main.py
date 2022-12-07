@@ -73,6 +73,7 @@ def main(argv):
     
     print(f'jax devices: {jax.devices()}')
 
+    psnr_fn = lambda mse: -10. / jnp.log(10.) * jnp.log(mse)
     if FLAGS.mode == 'train':
         for i in range(config['num_epochs']):
             # train    
@@ -81,8 +82,10 @@ def main(argv):
                 key_train = random.split(key, img.shape[0])
         
                 data = (origins, directions, img, key_train)
-                state, loss_val, pred_train, weights, ts = train_step(data, state)
-                print(f'Epoch {i} step {idx} loss : {loss_val}')
+                state, loss_val, pred_train, weights, ts = train_step(data, state, grad_fn)
+                
+                psnr = psnr_fn(loss_val)
+                print(f'Epoch {i} step {idx} loss : {loss_val}, psnr : {psnr}')
                 
                 key, _ = random.split(key)
         
@@ -98,6 +101,7 @@ def main(argv):
                         render_hvs_fn,
                         )
                 cv2.imwrite(f'/tmp/eval_{i}.jpg', np.array(pred_img * 255)) 
+
                 checkpoints.save_checkpoint(ckpt_dir=ckpt_dir, target=state, step=i, overwrite=True)
     elif FLAGS.mode == 'render':
         print('rendering started ...')
