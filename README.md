@@ -22,16 +22,16 @@ WIP
 ## Training - GPU and TPU
 WIP
 
-First, create a TPU-VM - by default, it is a preemptible TPU.
+First, create a TPU-VM; by default, it is a preemptible TPU.
 
 ```bash
 make create_gpu_vm
 ```
 
-Second, start training where the specified `CONFIG_PATH` exists locally, and `DATA_PATH` is the output of the video to nerf data generation scripts.
+Then you can start training. In the example below, the specified `CONFIG_PATH` should exist locally and has Nerf configuration parameters, and `DATA_PATH` is the output of the video-to-nerf data generation scripts outlined above.
 
 ```bash
 make train_tpu CONFIG_PATH=configs/tpu.YAML DATA_PATH=miso_shop
 ```
 
-After running this command, a `tmux` session `nerf` will be created, so attach to that session to see the logs - `tmux a -t nerf`.
+After running this command, the training will start on the TPU-VM within a `tmux` session called `nerf`. `ssh` into the VM and attach to the session to see the logs (`tmux a -t nerf`).
