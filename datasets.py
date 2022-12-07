@@ -78,17 +78,21 @@ class Dataset:
              
             if self.n < len(self.imgs):
                 img_batch, origins_batch, directions_batch = [], [], []
-                for _ in range(self.batch_size): 
-                    if self.n not in self.cache:
-                        img, origins, directions = self.get(self.n)
+                
+                # Populate the batch - batch_size should be 1 if GPU  and >1 if TPU
+                while len(img_batch) < self.batch_size: 
+                    rand_image_selector = np.random.randint(0, len(self.imgs))
+                    if rand_image_selector not in self.cache:
+                        img, origins, directions = self.get(rand_image_selector)
                         origins = origins.reshape((-1, 3))
                         directions = directions.reshape((-1, 3))
                         img = img.reshape((-1, 3))
     
-                        self.cache[self.n] = [origins, directions, img]
+                        self.cache[rand_image_selector] = [origins, directions, img]
                     else:
-                        origins, directions, img = self.cache[self.n]
-    
+                        origins, directions, img = self.cache[rand_image_selector]
+
+                    # TODO : use np instead of jnp 
                     rand_idx = jax.random.randint(self.key, (self.mini_batch_size, 1), 0, len(img)) 
                     rand_idx = jnp.squeeze(rand_idx)
     
