@@ -82,6 +82,7 @@ class Dataset:
                 # Populate the batch - batch_size should be 1 if GPU  and >1 if TPU
                 while len(img_batch) < self.batch_size: 
                     rand_image_selector = np.random.randint(0, len(self.imgs))
+                    print(f'Getting image index : {rand_image_selector}')
                     if rand_image_selector not in self.cache:
                         img, origins, directions = self.get(rand_image_selector)
                         origins = origins.reshape((-1, 3))

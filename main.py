@@ -26,14 +26,13 @@ def train_step(data, state, grad_fn):
     state = state.apply_gradients(grads=grads)
     return state, loss_val, pred_train, weights, ts
 
-def render_step(data, state, H, W, render_fn, render_hvs_fn):
-
+def render_step(data, state, H, W, render_fn, render_hvs_fn, eval_bs=2048):
+    print('starting render step')
     params = state.params 
     
     (origins, directions) = data
     origins = origins.reshape((-1, 3))
     directions = directions.reshape((-1, 3))
-    eval_bs = 4096//2 
 
     key = jax.random.PRNGKey(0)
 
@@ -80,6 +79,7 @@ def main(argv):
             for idx, (img, origins, directions) in enumerate(dataset['train']):
         
                 key_train = random.split(key, img.shape[0])
+                print(f'Img batch shape : {img.shape}')
         
                 data = (origins, directions, img, key_train)
                 state, loss_val, pred_train, weights, ts = train_step(data, state, grad_fn)
