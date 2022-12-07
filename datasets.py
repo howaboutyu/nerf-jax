@@ -249,7 +249,8 @@ class LegoDataset(Dataset):
                 
         self.scale = config['scale'] 
         
-
+        if 'mini_batch_size' in config:
+            self.mini_batch_size = config['mini_batch_size']
 
         if config['use_batch']:
             self.batch_size = jax.local_device_count() 
@@ -296,7 +297,7 @@ class LegoDataset(Dataset):
         self.W = W
         self.focal = focal 
         if self.subset == 'render':
-            self._generate_spiral_poses(self.poses, jnp.array([2., 6.]))
+            self._generate_spiral_poses(self.poses, jnp.array([2., 16.]))
 
 
 
@@ -315,6 +316,10 @@ class LLFF(Dataset):
         if config['use_batch']:
             self.batch_size = jax.local_device_count() 
             print(f'Using batch mode with {self.batch_size} local devices')
+
+        if 'mini_batch_size' in config:
+            self.mini_batch_size = config['mini_batch_size']
+
 
         self.subset = subset 
 
@@ -382,6 +387,8 @@ class LLFF(Dataset):
         self.far = np.max(bds) * 1.
 
         print('focal ', self.focal)
+        print('far ', self.far)
+        print('near', self.near)
 
 
       
