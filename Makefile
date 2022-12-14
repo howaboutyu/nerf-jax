@@ -59,7 +59,7 @@ vid_to_nerf:
 	
 	mkdir -p $(OUT_PATH)/images
 	sudo docker run --gpus all -v`pwd`:/nerf -i bmild/tf_colmap bash -c \
-		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.jpg; \
+		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.png; \
 		python /nerf/LLFF/imgs2poses.py /nerf/$(OUT_PATH)"
 
 
