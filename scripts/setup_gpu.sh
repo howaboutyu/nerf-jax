@@ -20,7 +20,7 @@ sudo apt-get install -y nvidia-docker2
 sudo systemctl restart docker
 
 # nerf stuff
-rm -rv ~/nerf
+sudo rm -rv ~/nerf
 git clone https://github.com/higgsboost/nerf-jax ~/nerf
 cd ~/nerf
 sudo docker pull bmild/tf_colmap

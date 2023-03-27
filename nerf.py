@@ -13,43 +13,51 @@ def encoding_func(x, L):
         encoded_array.extend([jnp.sin(2. ** i * jnp.pi * x), jnp.cos(2. ** i * jnp.pi * x)])
     return jnp.concatenate(encoded_array, -1)
 
+def hvs(weights, t, sample_size, key):
+    # Hierarchical volume sampling
+    # Inputs:
+    #   weights : weights of the distribution to sample from
+    #   t : points to sample from the distribution
+    #   sample_size : number of samples to draw
+    #   key : random key
+    # Outputs:
+    #   sampled_t : sampled points from the distribution
 
-def hvs(weights, t, t_to_sample, key):
+
     weights = jnp.squeeze(weights) + 1e-10 
 
     # normalize
     norm = jnp.sum(weights, -1)
-    weights = weights/norm[..., jnp.newaxis]
+    pdf = weights/norm[..., jnp.newaxis]
 
-    cdf = jnp.cumsum(weights, -1)
+    cdf = jnp.cumsum(pdf, -1)
 
-#    cdf = jnp.concatenate([
-#        jnp.zeros_like(cdf[...,0][..., jnp.newaxis]), 
-#        cdf, 
-#        jnp.ones_like(cdf[..., 1][..., jnp.newaxis])], -1)
- 
-
-
-    def inverse_sample(Z):
+    def inverse_sample(Z, cdf, t_to_sample):
+        # Sample from the inverse CDF using inverse transform sampling method
+        # Inputs:
+        #   Z : numbers from a uniform distribution U(0,1)
+        #   cdf : CDF of the distribution to sample from 
+        #   t_to_sample : points to sample from the distribution
+        # Outputs:
+        #   sampled_t : sampled points from the distribution 
     
         abs_diff = jnp.abs(cdf[...,  jnp.newaxis, :] - Z[..., jnp.newaxis])
     
-        argmin = jnp.argmin(abs_diff, -2)
+        argmin = jnp.argmin(abs_diff, 1)
     
         sampled_t = jnp.take_along_axis(t_to_sample, argmin, -1)
+    
         return sampled_t
 
     
-    # TODO: currently it is assuming that len(t)//2 = len(t_to_sample), like in the paper
-    Z = jax.random.uniform(key, t_to_sample.shape)
+    Z = jax.random.uniform(key, (sample_size.shape[0], sample_size.shape[1], 1)) 
 
     key, _ = jax.random.split(key)
-    sampled_t1 = inverse_sample(Z)
+    sampled_t = inverse_sample(Z)
 
-    Z = jax.random.uniform(key, t_to_sample.shape)
-    sampled_t2 = inverse_sample(Z)
 
-    new_t = jnp.concatenate([sampled_t1, sampled_t2, t], -1)
+     
+    new_t = jnp.concatenate([sampled_t, t], -1)
     new_t = jnp.sort(new_t, -1)
     return new_t 
 
@@ -85,12 +93,10 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
     else: 
         rgb, opacity = model_func.apply(params, encoded_x) 
 
-    rgb = jax.nn.sigmoid(rgb)
     
     if rand:
         opacity = opacity + jax.random.normal(key, opacity.shape, dtype=opacity.dtype) 
    
-    opacity = jax.nn.relu(opacity) 
 
     t_delta = t[...,1:] - t[...,:-1]
     t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], 1])], 1)
@@ -109,30 +115,38 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
 
 
 def get_model(L_position, L_direction):
+
     class Model(nn.Module):
-
       @nn.compact
-      def __call__(self, z, direction):
-        input = z
+      def __call__(self, position, direction):
+        x =  position
+        for i in range(7):
+            x = nn.Dense(256, name=f'fc{i + 1}')(x)
+            x = nn.relu(x)
     
-        for i in range(9):
-            z = nn.Dense(256, name=f'fc{i}')(z)
-            z = nn.relu(z)
+            # Concat x with original input 
             if i == 4:
-                z = jnp.concatenate([z, input], -1) 
+                x = jnp.concatenate([x, position], -1)
     
-            if i == 7: 
-                d = nn.Dense(1, name='fcd2')(z)
-
-        if L_direction: z = jnp.concatenate([z, direction], -1)
-
-        z = nn.Dense(128, name='fc_128')(z)
-        z = nn.relu(z) 
-        z = nn.Dense(3, name='fc_f')(z)
-        return z, d 
+        x = nn.Dense(256, name=f'fc{8}_linear')(x)
+    
+        vol_density = nn.Dense(1, name=f'fc{8}_sigmoid')(x)
+    
+        # Create an output for the volume density that is view independent
+        # and > 0 by using a relu activation function 
+        vol_density = jax.nn.relu(vol_density)
+    
+        # Concat direction information after the volume density
+        x = jnp.concatenate([x, direction], -1)
+        x = nn.Dense(128, name='fc_128')(x)
+        x = nn.relu(x)
+        x = nn.Dense(3, name='fc_f')(x)
+    
+        # rgb color is between 0 and 1
+        rgb = nn.sigmoid(x)
+        return rgb, vol_density
     
     model = Model()
-
     if not L_direction:
         params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
     else:
