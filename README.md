@@ -10,8 +10,10 @@ Conversion from video files to nerf datasets requires a GPU. You can convert it 
 ```bash
 # 1) Setup
 make start_gpu_convert:
-# 2) convert - example
+# 2) Convert 
 make vid_to_nerf_cloud VID_FILE=IMG_123.MOV OUT_PATH=IMG_123
+# 3) Delete gpu vm 
+make delete_gpu_vm
 ```
 After, you will have a folder of images and poses in the specified `OUT_PATH` folder.
 

@@ -93,12 +93,8 @@ start_tpu_vm:
 stop_tpu_vm:
 	gcloud compute tpus tpu-vm stop nerf --zone europe-west4-a 
 
-
 connect_tpu_vm:
 	gcloud compute tpus tpu-vm ssh nerf --zone europe-west4-a
-
-setup_vm:
-	pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
 delete_tpu_vm:
 	gcloud compute tpus tpu-vm delete nerf  --zone europe-west4-a
@@ -108,3 +104,6 @@ list_vm:
 	gcloud compute tpus tpu-vm list --zone europe-west4-a
 	echo '############### GPU ##############'
 	gcloud compute instances list
+
+
+
