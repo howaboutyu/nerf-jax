@@ -8,29 +8,37 @@ from typing import Any
 
 
 def encoding_func(x, L):
+    # Inputs:
+    #   x : input to be encoded
+    #   L : number of frequencies to encode
+    # Outputs:
+    #   encoded_array : encoded array
+
     encoded_array = [x]
     for i in range(L):
         encoded_array.extend([jnp.sin(2. ** i * jnp.pi * x), jnp.cos(2. ** i * jnp.pi * x)])
     return jnp.concatenate(encoded_array, -1)
 
-def hvs(weights, t, sample_size, key):
+def hvs(weights, t, num_to_sample, key):
     # Hierarchical volume sampling
     # Inputs:
     #   weights : weights of the distribution to sample from
     #   t : points to sample from the distribution
-    #   sample_size : number of samples to draw
+    #   num_to_sample: number of samples to draw, 
+    #                  should be greater than the number of points in t
+    #                  and divisible by the number of points in t
     #   key : random key
     # Outputs:
     #   sampled_t : sampled points from the distribution
 
-
+    # find cdf
     weights = jnp.squeeze(weights) + 1e-10 
-
-    # normalize
     norm = jnp.sum(weights, -1)
+
     pdf = weights/norm[..., jnp.newaxis]
 
     cdf = jnp.cumsum(pdf, -1)
+
 
     def inverse_sample(Z, cdf, t_to_sample):
         # Sample from the inverse CDF using inverse transform sampling method
@@ -44,22 +52,131 @@ def hvs(weights, t, sample_size, key):
         abs_diff = jnp.abs(cdf[...,  jnp.newaxis, :] - Z[..., jnp.newaxis])
     
         argmin = jnp.argmin(abs_diff, 1)
-    
-        sampled_t = jnp.take_along_axis(t_to_sample, argmin, -1)
+        # import pdb; pdb.set_trace() 
+
+        # expand argmin to match the shape of t_to_sample
+        #argmin = jnp.expand_dims(argmin, -1)
+        #import pdb; pdb.set_trace() 
+
+        sampled_t = jnp.take_along_axis(t_to_sample, argmin, -2)
     
         return sampled_t
 
+
+    # t with hvs
+    t_hvs = [t]
+
     
-    Z = jax.random.uniform(key, (sample_size.shape[0], sample_size.shape[1], 1)) 
+    num_loops = int(num_to_sample/t.shape[1]) 
 
-    key, _ = jax.random.split(key)
-    sampled_t = inverse_sample(Z)
+    # loop over num_loops until we have num_to_sample samples
+    for i in range(num_loops):
+        Z = jax.random.uniform(key, (weights.shape[0], num_to_sample)) 
+
+        key, _ = jax.random.split(key)
+        sampled_t = inverse_sample(Z, cdf, t)
+        t_hvs.append(sampled_t)
+
+    
+    #import pdb; pdb.set_trace()
+    t_hvs = jnp.concatenate(t_hvs, -1)
+
+    return t_hvs 
 
 
-     
-    new_t = jnp.concatenate([sampled_t, t], -1)
-    new_t = jnp.sort(new_t, -1)
-    return new_t 
+
+def get_points(key, origin, direction, near, far, num_coarse_samples, num_fine_samples, random_sample, use_hvs, weights):
+    """
+    Get points to render
+    Inputs:
+        key : random key
+        origin : origin of the rays, [batch_size, 3]
+        direction : direction of the rays, [batch_size, 3]
+        near : near plane
+        far : far plane
+        num_coarse_samples : number of coarse samples
+        num_fine_samples : number of fine samples
+        random_sample: sample randomly 
+        use_hvs : use hierarchical volume sampling
+        weights : weights of the distribution to sample from
+    Outputs:
+        points : points to render
+    """
+
+    t = jnp.linspace(near, far, num_coarse_samples) 
+
+    
+    if random_sample: 
+        random_shift = jax.random.uniform(key, (origin.shape[0], num_coarse_samples)) * (far-near)/num_coarse_samples
+        t = t+ random_shift 
+
+    elif use_hvs:
+
+        t_to_sample = jnp.broadcast_to(t, (origin.shape[0], num_coarse_samples))
+
+        t = jnp.linspace(near, far, weights.shape[-2]) 
+        t = jnp.broadcast_to(t, (origin.shape[0], weights.shape[-2]))
+
+        t = hvs(weights, t, num_fine_samples, key)
+        t = jax.lax.stop_gradient(t) 
+
+
+    # t has shape [batch_size, num_samples (either N_c or N_c + N_f)] 
+    # direction and origin has shapes [batch_size, 3]
+    
+    points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
+
+    return points
+
+def encode_points_nd_directions(points, directions, L_position, L_direction):
+    """
+    Encode points and directions
+    Inputs:
+        points : points to encode, [batch_size, num_samples, 3]
+        directions : directions to encode, [batch_size, num_samples, 3]
+        L_position : number of frequencies to encode for points
+        L_direction : number of frequencies to encode for directions
+    Outputs:
+        encoded_points : encoded points, [batch_size, num_samples, 3*(L_position+1)]
+        encoded_directions : encoded directions, [batch_size, num_samples, 3*(L_direction+1)]
+    """
+
+    encoded_points = encoding_func(points, L_position)
+    encoded_directions = encoding_func(directions, L_direction)
+
+    return encoded_points, encoded_directions
+
+def render_fn(key, origin, direction, L_position, L_direction, use_random_noise, use_hvs, weights):
+
+    encoded_x = encoding_func(points, L_position)
+
+    if L_direction > 0:
+        direction = jnp.broadcast_to(direction[..., jnp.newaxis, :], points.shape)
+        encoded_dir = encoding_func(direction, L_direction)
+        rgb, density = model_func.apply(params, encoded_x, encoded_dir) 
+    else: 
+        rgb, density = model_func.apply(params, encoded_x) 
+
+    if rand:
+        density = opacity + jax.random.normal(key, opacity.shape, dtype=opacity.dtype) 
+
+    t_delta = t[...,1:] - t[...,:-1]
+    t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], 1])], 1)
+
+    
+    T_i = jnp.cumsum(jnp.squeeze(density) * t_delta + 1e-10, -1)   
+    T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
+    T_i = jnp.exp(-T_i)[..., :-1]
+    
+
+    weights = T_i[..., jnp.newaxis]*(1.-jnp.exp(-density*t_delta[..., jnp.newaxis])) 
+    c_array = weights * rgb 
+    c_sum =jnp.sum(c_array, -2)
+
+    return c_sum, weights, t
+
+
+
 
 def render(model_func, params, origin, direction, key, near, far, num_samples, L_position, L_direction, rand, use_hvs, weights):
     t = jnp.linspace(near, far, num_samples) 
@@ -84,30 +201,32 @@ def render(model_func, params, origin, direction, key, near, far, num_samples, L
 
     
     points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
+
+
     encoded_x = encoding_func(points, L_position)
 
     if L_direction:
         direction = jnp.broadcast_to(direction[..., jnp.newaxis, :], points.shape)
         encoded_dir = encoding_func(direction, L_direction)
-        rgb, opacity = model_func.apply(params, encoded_x, encoded_dir) 
+        rgb, density = model_func.apply(params, encoded_x, encoded_dir) 
     else: 
-        rgb, opacity = model_func.apply(params, encoded_x) 
+        rgb, density = model_func.apply(params, encoded_x) 
 
     
     if rand:
-        opacity = opacity + jax.random.normal(key, opacity.shape, dtype=opacity.dtype) 
+        density = opacity + jax.random.normal(key, opacity.shape, dtype=opacity.dtype) 
    
 
     t_delta = t[...,1:] - t[...,:-1]
     t_delta = jnp.concatenate([t_delta, jnp.broadcast_to(jnp.array([1e10]),   [points.shape[0], 1])], 1)
 
     
-    T_i = jnp.cumsum(jnp.squeeze(opacity) * t_delta + 1e-10, -1)   
+    T_i = jnp.cumsum(jnp.squeeze(density) * t_delta + 1e-10, -1)   
     T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
     T_i = jnp.exp(-T_i)[..., :-1]
     
 
-    weights = T_i[..., jnp.newaxis]*(1.-jnp.exp(-opacity*t_delta[..., jnp.newaxis])) 
+    weights = T_i[..., jnp.newaxis]*(1.-jnp.exp(-density*t_delta[..., jnp.newaxis])) 
     c_array = weights * rgb 
     c_sum =jnp.sum(c_array, -2)
 
