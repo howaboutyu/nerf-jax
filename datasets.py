@@ -1,6 +1,6 @@
 '''
 Datasets for nerf
-Many functions are taken from: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
+Ref: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
 '''
 
 import jax
@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from typing import List, Any
 import numpy as np
 import time
+
+from utils import Config 
 
 
 def get_rays(H, W, focal, pose):
@@ -45,9 +47,9 @@ class Dataset:
     batch_size: int = 1
     use_batch: bool = False
     max_eval: int = 2 
-    imgs: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
-    poses: List[jnp.array] = field(default_factory=lambda: jnp.array([]))
-    key: Any = field(default=jax.random.PRNGKey(0)) 
+    imgs: List[jnp.array] = field(default_factory=lambda: [])
+    poses: List[jnp.array] = field(default_factory=lambda: [])
+    key: Any = field(default_factory=jax.random.PRNGKey(0)) 
 
 
     def get(self, idx):
@@ -238,24 +240,19 @@ class Dataset:
 
 class LegoDataset(Dataset): 
     
-    def __init__(self, config, data_path='nerf_synthetic/lego', subset='train'):
-        
-        self.data_path = data_path
+    def __init__(self, config: Config, subset: str):
+
+        self.data_path = config.dataset_path
         self.subset = subset 
         
         self.normalizer = lambda x : x/255.
 
-        self.near = config['near']
-        self.far = config['far']
+        self.near = config.near
+        self.far = config.far
                 
-        self.scale = config['scale'] 
+        self.scale = config.scale
         
-        if 'mini_batch_size' in config:
-            self.mini_batch_size = config['mini_batch_size']
-
-        if config['use_batch']:
-            self.batch_size = jax.local_device_count() 
-            print(f'Using batch mode with {self.batch_size} local devices')
+        self.batch_size = config.batch_size
 
         self.get_raw_data()
         
@@ -263,9 +260,8 @@ class LegoDataset(Dataset):
         
         self.cache = dict() 
 
-
+    
     def get_raw_data(self):
-
 
         json_p = os.path.join(self.data_path, f'transforms_{self.subset}.json')
 
@@ -306,22 +302,15 @@ class LLFF(Dataset):
     '''
     '''
     
-    def __init__(self, config, subset='train'):
+    def __init__(self, config: Config, subset: str='train'):
          
-        self.data_path =config['data_path'] 
         
-        self.normalizer = lambda x : x/255.
+        self.normalizer = lambda x : x / 255.
                 
         self.scale = config['scale'] 
+
+        self.config  = config   
         
-        if config['use_batch']:
-            self.batch_size = jax.local_device_count() 
-            print(f'Using batch mode with {self.batch_size} local devices')
-
-        if 'mini_batch_size' in config:
-            self.mini_batch_size = config['mini_batch_size']
-
-
         self.subset = subset 
 
         self.get_raw_data()
@@ -367,8 +356,6 @@ class LLFF(Dataset):
         if self.subset == 'render':
             self._generate_spiral_poses(poses, bds)
 
-
-
         self.focal = poses[0, -1, -1]
         
         sample_n = int(len(images) * self.split_frac)
@@ -395,14 +382,14 @@ class LLFF(Dataset):
       
         
 def dataset_factory(config):
-    if config['dataset_name'] == 'lego':
+    if config.dataset_type == 'lego':
         return {
             'train': LegoDataset(config, subset='train'),
             'val': LegoDataset(config, subset='val'),
             'render': LegoDataset(config, subset='render'),
         }
 
-    elif config['data_type'] == 'llff':
+    elif config.dataset_type == 'llff':
         return {
             'train': LLFF(config, subset='train'),
             'val': LLFF(config, subset='val'),
