@@ -6,8 +6,8 @@ from nerf import (
     render_fn, 
     get_points,
     encode_points_nd_directions,
-    get_gradients,
-    
+    loss_func,
+    get_loss_func 
 )
 
 
@@ -166,7 +166,7 @@ def test_render_fn(dummy_data):
     assert rendered.shape == (Config.batch_size, 3)
 
 
-def test_get_gradients(dummy_data):
+def test_loss_fn(dummy_data):
 
     key = jax.random.PRNGKey(0)
     
@@ -176,25 +176,48 @@ def test_get_gradients(dummy_data):
     origins = jnp.ones((Config.batch_size, 3))
     directions = jnp.ones((Config.batch_size, 3))
 
-    gradients = get_gradients(
-        key=key,
-        model_func=model,
+    #loss, (rendered, weights, t) = loss_func(
+    #    params=params,
+    #    model_func=model,
+    #    key=key,
+    #    origins=origins,
+    #    directions=directions,
+    #    near=Config.near,
+    #    far=Config.far,
+    #    L_position=Config.L_position,
+    #    L_direction=Config.L_direction,
+    #    num_samples_coarse=Config.num_samples_coarse,
+    #    num_samples_fine=Config.num_samples_fine,
+    #    expected_rgb=jnp.ones((Config.batch_size, 3)),
+    #    use_hvs=True)
+
+    loss_func_got = get_loss_func(
+        model,
+        Config.near,
+        Config.far,
+        Config.L_position,
+        Config.L_direction,
+        Config.num_samples_coarse,
+        Config.num_samples_fine,
+        use_hvs=True,
+        use_direction=True,
+        use_random_noise=True,
+    )
+
+    loss, (rendered, weights, t) = loss_func_got(
         params=params,
+        key=key,
         origins=origins,
         directions=directions,
-        near=Config.near,
-        far=Config.far,
-        L_position=Config.L_position,
-        L_direction=Config.L_direction,
-        num_samples_coarse=Config.num_samples_coarse,
-        num_samples_fine=Config.num_samples_fine,
         expected_rgb=jnp.ones((Config.batch_size, 3)),
-        use_hvs=True)
+    )
         
 
+    assert loss.shape == ()
+    assert rendered.shape == (Config.batch_size, 3)
+    assert weights.shape == (Config.batch_size, Config.num_samples_fine + Config.num_samples_coarse, 1)
 
         
-
 
 if __name__ == '__main__':
     pytest.main()
