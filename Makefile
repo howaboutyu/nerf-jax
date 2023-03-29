@@ -4,7 +4,9 @@ build:
 
 
 get_mini_nerf_data:
+	# Unused in this repo
 	wget https://people.eecs.berkeley.edu/~bmild/nerf/tiny_nerf_data.npz
+	unzip tiny_nerf_data.npz
 
 get_nerf_example_data:
 	wget http://cseweb.ucsd.edu/~viscomp/projects/LF/papers/ECCV20/nerf/nerf_example_data.zip
