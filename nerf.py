@@ -3,6 +3,8 @@ import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import checkpoints, train_state
 import optax
+import functools
+
 from typing import Any
 
 
@@ -283,35 +285,66 @@ def get_model(L_position, L_direction):
     return model, params
 
 
-def get_gradients(
-        key,
+
+def loss_func(
+        params,
         model_func, 
-        params, 
+        key,
         origins,
         directions,
+        expected_rgb,
         near,
         far,
         L_position,
         L_direction,
         num_samples_coarse,
         num_samples_fine,
-        expected_rgb,
         use_hvs,
         use_direction=True,
         use_random_noise=True,
     ):
     """
-    Get gradients of the loss function
-    Inputs:
-
     """
 
     batch_size = origins.shape[0]
     
 
-    def loss_func(params):
-
-        points, t, origins_ray, directions_ray = get_points(
+    points, t, origins_ray, directions_ray = get_points(
+        key,
+        origins,
+        directions,
+        near,
+        far,
+        num_samples_coarse,
+        num_samples_fine,
+        random_sample=True,
+        weights=None,
+        use_hvs=False,
+    )
+ 
+    # encode poitns and directions
+    encoded_points, encoded_directions = encode_points_nd_directions(
+        points, directions_ray, L_position, L_direction
+    )
+        
+    rendered, weights_coarse = render_fn(
+        key,
+        model_func,
+        params,
+        t,
+        encoded_points,
+        encoded_directions,
+        weights=None,
+        use_direction=use_direction,
+        use_random_noise=use_random_noise,
+    )
+ 
+    loss = jnp.mean((rendered - expected_rgb) ** 2)
+ 
+ 
+    if use_hvs:
+ 
+        points_hvs, t_hvs, origins_hvs_ray, directions_hvs_ray = get_points(
             key,
             origins,
             directions,
@@ -319,99 +352,66 @@ def get_gradients(
             far,
             num_samples_coarse,
             num_samples_fine,
-            random_sample=True,
-            weights=None,
-            use_hvs=False,
+            random_sample=False,
+            use_hvs=True,
+            weights=weights_coarse,
         )
-
+ 
         # encode poitns and directions
-        encoded_points, encoded_directions = encode_points_nd_directions(
-            points, directions_ray, L_position, L_direction
+        encoded_points_hvs, encoded_directions_hvs = encode_points_nd_directions(
+            points_hvs, directions_hvs_ray, L_position, L_direction
         )
-            
-        rendered, weights_coarse = render_fn(
+ 
+        rendered_hvs, weights_hvs = render_fn(
             key,
             model_func,
             params,
-            t,
-            encoded_points,
-            encoded_directions,
-            weights=None,
+            t_hvs,
+            encoded_points_hvs,
+            encoded_directions_hvs,
+            weights=weights_coarse,
             use_direction=use_direction,
             use_random_noise=use_random_noise,
         )
-
-        loss = jnp.mean((rendered - expected_rgb) ** 2)
-
-
-        if use_hvs:
-
-            points_hvs, t_hvs, origins_hvs_ray, directions_hvs_ray = get_points(
-                key,
-                origins,
-                directions,
-                near,
-                far,
-                num_samples_coarse,
-                num_samples_fine,
-                random_sample=False,
-                use_hvs=True,
-                weights=weights_coarse,
-            )
-
-            # encode poitns and directions
-            encoded_points_hvs, encoded_directions_hvs = encode_points_nd_directions(
-                points_hvs, directions_hvs_ray, L_position, L_direction
-            )
-
-            rendered_hvs, weights_hvs = render_fn(
-                key,
-                model_func,
-                params,
-                t_hvs,
-                encoded_points_hvs,
-                encoded_directions_hvs,
-                weights=weights_coarse,
-                use_direction=use_direction,
-                use_random_noise=use_random_noise,
-            )
-
-            loss_hvs = jnp.mean((rendered_hvs - expected_rgb) ** 2)
-
-            loss = loss + loss_hvs
-
-
-
-
+ 
+        loss_hvs = jnp.mean((rendered_hvs - expected_rgb) ** 2)
+ 
+        loss = loss + loss_hvs
+        return loss, (rendered_hvs, weights_hvs, t_hvs)
+    else:
         return loss, (rendered, weights_coarse, t)
-
-    # Get gradients of the loss function
-    (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
-
-
-            
-
-
-
-
-def get_grad(params, data, render, render_hvs, use_hvs):
-
-    origins, directions, y_target, key = data
-    def loss_func(params):
-        image_pred, weights, ts = render(params, origins, directions, key)
-
-        if not use_hvs:
-            return jnp.mean((image_pred -  y_target) ** 2), (image_pred, weights, ts)
-
-        image_pred_hvs, weights_hvs, ts  = render_hvs(params, origins, directions, key, weights)
-
-        loss_hvs =  jnp.mean((image_pred -  y_target) ** 2 + (image_pred_hvs -  y_target) ** 2)
-        return loss_hvs, (image_pred_hvs, weights, ts)
-
-    (loss_val, (image_pred, weights, ts)), grads = jax.value_and_grad(loss_func, has_aux=True)(params)
-    return loss_val, grads, image_pred, weights, ts
-
-
+ 
+def get_loss_func(    
+        model,
+        near,
+        far,
+        L_position,
+        L_direction,
+        num_samples_coarse,
+        num_samples_fine,
+        use_hvs,
+        use_direction=True,
+        use_random_noise=True,
+    ):
+    """
+    A wrapper function to return a loss function with the given parameters
+    """
+    
+    loss_fn = functools.partial(  
+        loss_func,
+        model_func=model,
+        near=near,
+        far=far,
+        L_position=L_position,
+        L_direction=L_direction,
+        num_samples_coarse=num_samples_coarse,
+        num_samples_fine=num_samples_fine,
+        use_hvs=use_hvs,
+        use_direction=use_direction,
+        use_random_noise=use_random_noise,
+    )
+    
+    return loss_fn
 
 def get_nerf_componets(config):
 
