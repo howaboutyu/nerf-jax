@@ -43,9 +43,8 @@ class Dataset:
     near: float
     far: float
     split_frac: float = 0.9 
-    mini_batch_size: int = 1024 
-    batch_size: int = 1
-    use_batch: bool = False
+    batch_size: int = 1024 # <- number of rays per batch
+    num_devices: int = 1  # <- number of devices, i.e. number of GPUs
     max_eval: int = 2 
     imgs: List[jnp.array] = field(default_factory=lambda: [])
     poses: List[jnp.array] = field(default_factory=lambda: [])
@@ -81,8 +80,7 @@ class Dataset:
             if self.n < len(self.imgs):
                 img_batch, origins_batch, directions_batch = [], [], []
                 
-                # Populate the batch - batch_size should be 1 if GPU  and >1 if TPU
-                while len(img_batch) < self.batch_size: 
+                while len(img_batch) < self.num_devices: 
                     rand_image_selector = np.random.randint(0, len(self.imgs))
                     print(f'Getting image index : {rand_image_selector}')
                     if rand_image_selector not in self.cache:
@@ -95,8 +93,7 @@ class Dataset:
                     else:
                         origins, directions, img = self.cache[rand_image_selector]
 
-                    # TODO : use np instead of jnp 
-                    rand_idx = jax.random.randint(self.key, (self.mini_batch_size, 1), 0, len(img)) 
+                    rand_idx = jax.random.randint(self.key, (self.batch_size, 1), 0, len(img)) 
                     rand_idx = jnp.squeeze(rand_idx)
     
                     img = img[rand_idx]
@@ -254,11 +251,15 @@ class LegoDataset(Dataset):
         
         self.batch_size = config.batch_size
 
+        self.num_devices = config.num_devices
+
         self.get_raw_data()
         
         self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
         
         self.cache = dict() 
+
+        self.key = jax.random.PRNGKey(0)
 
     
     def get_raw_data(self):
@@ -318,6 +319,8 @@ class LLFF(Dataset):
         self.get_rays_jit = jax.jit(lambda pose: get_rays(self.H, self.W, self.focal, pose))
         
         self.cache = dict() 
+
+
 
 
 
