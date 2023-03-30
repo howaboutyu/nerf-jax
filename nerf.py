@@ -288,11 +288,11 @@ def get_model(L_position, L_direction):
 
 def loss_func(
         params,
-        model_func, 
         key,
         origins,
         directions,
         expected_rgb,
+        model_func, 
         near,
         far,
         L_position,

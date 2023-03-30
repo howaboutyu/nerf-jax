@@ -19,7 +19,8 @@ class Config:
     num_samples_coarse: int = 64
     num_samples_fine: int = 128 
 
-    batch_size: int = 4
+    batch_size: int = 1024 # <-- this is the batch size per device
+    num_devices: int = 1 # <-- this is the number of devices
     num_epochs: int = 100
     learning_rate: float = 0.0001
     optimizer: str = 'adam'
