@@ -13,9 +13,11 @@ use_hvs: True
 L_position: 10 
 L_direction: 4 
 
-num_epochs: 500000000
+num_epochs: 300_000 
 learning_rate: 5.e-5
 optimizer: adam
+batch_size: 32 
+num_devices: 1
 
 ckpt_dir: 'ckpt_lego_dir'
 
