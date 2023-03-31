@@ -223,7 +223,7 @@ def render_fn(
     t_delta = jnp.concatenate([t_delta, zero_column], -1)
 
     # volume rendering 
-    T_i = jnp.cumsum(jnp.squeeze(density) * t_delta + 1e-10, -1)   
+    T_i = jnp.cumsum(jnp.squeeze(density) * t_delta, -1)   
     T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
     T_i = jnp.exp(-T_i)[..., :-1]
 
@@ -380,7 +380,7 @@ def nerf(
  
         return (rendered, rendered_hvs), weights_hvs, t_hvs
     else:
-        return (rendered), weights_coarse, t
+        return (rendered,rendered), weights_coarse, t
  
 def get_nerf(    
         near,
