@@ -94,19 +94,21 @@ def train(config: NerfConfig):
     
         return state, loss, rgbs_pred, weights, ts 
     
-    def eval_step(state, key, val_data, eval_batch_size):
+    def eval_step(state, val_data, eval_batch_size):
         '''
         Evaluation step, takes in an entire image and returns the predicted image
         and also metrics
         Inputs:
             state: replicated train state 
-            key: jax random key  
             val_dtaa: img, origins and directions of rays each with [H, W, 3]
             eval_batch_size: batch size for evaluation 
         Outputs:
             pred_imgs: predicted images [H, W, 3]
             
         '''
+        
+        # for eval key stays the same
+        key = jax.random.PRNGKey(0)
         
         eval_img = val_data[0]
         eval_origins = val_data[1]
@@ -168,21 +170,20 @@ def train(config: NerfConfig):
             )
             print(f'Loss {loss}')
         
-            key = jax.random.split(key, 1)[0]
 
             with summary_writer.as_default(step=state.step): 
                 tf.summary.scalar('train loss', loss[0], step=state.step)
-                tf.summary.histogram('weights', weights, step=state.step)
-                tf.summary.histogram('ts', ts, step=state.step)
-            
-            # Evaluation
-            # Take the first image from the val set  
-            eval_data = dataset['val'].get(0)
-            pred_img, ssim = eval_step(state, key, eval_data, config.batch_size)
-            with summary_writer.as_default(step=state.step):
-                tf.summary.image('pred_img', pred_img, step=state.step)
-                #tf.summary.image('gt_img', [eval_data[0]], step=state.step)
-                tf.summary.scalar('val ssim', ssim[0], step=state.step)
+        
+
+            if state.step % config.steps_per_eval == 0:
+                # Evaluation
+                # Take the first image from the val set  
+                eval_data = dataset['val'].get(0)
+                pred_img, ssim = eval_step(state, eval_data, config.batch_size)
+                with summary_writer.as_default(step=state.step):
+                    tf.summary.image('pred_img', pred_img, step=state.step)
+                    #tf.summary.image('gt_img', [eval_data[0]], step=state.step)
+                    tf.summary.scalar('val ssim', ssim[0], step=state.step)
 
             
 
