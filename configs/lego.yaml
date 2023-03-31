@@ -16,8 +16,9 @@ L_direction: 4
 num_epochs: 300_000 
 learning_rate: 5.e-6
 optimizer: adam
-batch_size: 32 
+batch_size: 256 
 num_devices: 1
+steps_per_eval: 200
 
 ckpt_dir: 'ckpt_lego_dir'
 
