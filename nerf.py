@@ -55,7 +55,6 @@ def hvs(weights, t, t_to_sample, key):
         abs_diff = jnp.abs(cdf[...,  jnp.newaxis, :] - Z[..., jnp.newaxis])
     
         argmin = jnp.argmin(abs_diff, 1)
-        # import pdb; pdb.set_trace() 
 
         # expand argmin to match the shape of t_to_sample
 
@@ -81,8 +80,10 @@ def hvs(weights, t, t_to_sample, key):
         t_hvs.append(sampled_t)
 
     
-    #import pdb; pdb.set_trace()
     t_hvs = jnp.concatenate(t_hvs, -1)
+
+    # sort the t_hvs 
+    t_hvs = jnp.sort(t_hvs, -1)
 
     return t_hvs 
 
@@ -181,7 +182,6 @@ def render_fn(
         t,
         encoded_points, 
         encoded_directions, 
-        weights,
         use_direction, 
         use_random_noise, 
     ):
@@ -201,7 +201,7 @@ def render_fn(
         rgb : rgb values, [batch_size, num_samples, 3]
         density : density values, [batch_size, num_samples]
     """
-    
+
     if use_direction:
         rgb, density = model_func.apply(params, encoded_points, encoded_directions) 
     else: 
@@ -209,6 +209,9 @@ def render_fn(
 
     if use_random_noise:
         density = density + jax.random.normal(key, density.shape, dtype=density.dtype) 
+    
+    rgb = jax.nn.sigmoid(rgb)
+    density = jax.nn.relu(density)
 
     t_delta = t[...,1:] - t[...,:-1]
     
@@ -223,9 +226,13 @@ def render_fn(
     T_i = jnp.cumsum(jnp.squeeze(density) * t_delta + 1e-10, -1)   
     T_i = jnp.insert(T_i, 0, jnp.zeros_like(T_i[...,0]),-1)
     T_i = jnp.exp(-T_i)[..., :-1]
+
+    
     
     # weights = T_i * a_i
-    weights = T_i[..., jnp.newaxis]*(1.-jnp.exp(-density*t_delta[..., jnp.newaxis])) 
+    a_i = 1.-jnp.exp(-density*t_delta[..., jnp.newaxis])
+    weights = T_i[..., jnp.newaxis] * a_i
+
 
     c_array = weights * rgb 
     c_sum = jnp.sum(c_array, -2)
@@ -261,10 +268,6 @@ def get_model(L_position, L_direction):
     
         vol_density = nn.Dense(1, name=f'fc{8}_sigmoid')(x)
     
-        # Create an output for the volume density that is view independent
-        # and > 0 by using a relu activation function 
-        vol_density = jax.nn.relu(vol_density)
-    
         # Concat direction information after the volume density
         if L_direction: x = jnp.concatenate([x, direction], -1)
 
@@ -273,7 +276,7 @@ def get_model(L_position, L_direction):
         x = nn.Dense(3, name='fc_f')(x)
     
         # rgb color is between 0 and 1
-        rgb = nn.sigmoid(x)
+        rgb = x 
         return rgb, vol_density
     
     model = Model()
@@ -281,17 +284,17 @@ def get_model(L_position, L_direction):
         params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)))
     else:
         params = model.init(jax.random.PRNGKey(0), jnp.ones((1, L_position * 6 + 3)), jnp.ones((1, L_direction * 6 + 3)))
+        #params = model.init(jax.random.PRNGKey(0), jnp.ones((1, 1, L_position * 6 + 3)), jnp.ones((1, 1, L_direction * 6 + 3)))
 
     return model, params
 
 
 
-def loss_func(
+def nerf(
         params,
         key,
         origins,
         directions,
-        expected_rgb,
         model_func, 
         near,
         far,
@@ -304,11 +307,12 @@ def loss_func(
         use_random_noise=True,
     ):
     """
+
     """
 
     batch_size = origins.shape[0]
     
-
+    # get points for coarse 
     points, t, origins_ray, directions_ray = get_points(
         key,
         origins,
@@ -326,7 +330,8 @@ def loss_func(
     encoded_points, encoded_directions = encode_points_nd_directions(
         points, directions_ray, L_position, L_direction
     )
-        
+    
+    # render coarse
     rendered, weights_coarse = render_fn(
         key,
         model_func,
@@ -334,16 +339,15 @@ def loss_func(
         t,
         encoded_points,
         encoded_directions,
-        weights=None,
         use_direction=use_direction,
         use_random_noise=use_random_noise,
     )
  
-    loss = jnp.mean((rendered - expected_rgb) ** 2)
  
  
     if use_hvs:
- 
+        # get points using hvs
+        # which has num_samples_coarse + num_samples_fine points
         points_hvs, t_hvs, origins_hvs_ray, directions_hvs_ray = get_points(
             key,
             origins,
@@ -369,20 +373,16 @@ def loss_func(
             t_hvs,
             encoded_points_hvs,
             encoded_directions_hvs,
-            weights=weights_coarse,
             use_direction=use_direction,
             use_random_noise=use_random_noise,
         )
  
-        loss_hvs = jnp.mean((rendered_hvs - expected_rgb) ** 2)
  
-        loss = loss + loss_hvs
-        return loss, (rendered_hvs, weights_hvs, t_hvs)
+        return (rendered, rendered_hvs), weights_hvs, t_hvs
     else:
-        return loss, (rendered, weights_coarse, t)
+        return (rendered), weights_coarse, t
  
-def get_loss_func(    
-        model,
+def get_nerf(    
         near,
         far,
         L_position,
@@ -394,12 +394,14 @@ def get_loss_func(
         use_random_noise=True,
     ):
     """
-    A wrapper function to return a loss function with the given parameters
+    This function returns a nerf function with the given parameters
+    Example:
+        nerf = get_nerf(0.1, 10, 4, 4, 64, 128, True, True, True)
+        nerf(params, key, origins, directions)
     """
     
-    loss_fn = functools.partial(  
-        loss_func,
-        model_func=model,
+    nerf_specific = functools.partial(  
+        nerf,
         near=near,
         far=far,
         L_position=L_position,
@@ -410,59 +412,8 @@ def get_loss_func(
         use_direction=use_direction,
         use_random_noise=use_random_noise,
     )
-    
-    return loss_fn
 
-def get_nerf_componets(config):
-
-    near = config['near']
-    far = config['far']
-    
-    num_samples = config['num_samples'] 
-    use_hvs = config['use_hvs']
-    hvs_num_samples = config['hvs_num_samples'] 
-    L_position = config['L_position']
-    L_direction = config['L_direction'] if 'L_direction' in config else None
-
- 
-    model, params = get_model(config['L_position'], L_direction)
-
-    # render function for training with random sampling
-    render_concrete = lambda params, origin, direction, key: \
-        render(model, params, origin, direction, key, near, far, num_samples, L_position, L_direction, True, False, None)
-
-    # render function for training with Hierarchical volume sampling (hvs) 
-    render_concrete_hvs = lambda params, origin, direction, key, weights: \
-        render(model, params, origin, direction, key, near, far, hvs_num_samples, L_position, L_direction, False, True, weights)
-
-    render_concrete = jax.jit(render_concrete) 
-    render_concrete_hvs = jax.jit(render_concrete_hvs) 
-
-    grad_fn = lambda params, data: get_grad(params, data, render_concrete, render_concrete_hvs, use_hvs)
-    
-   
-    learning_rate = config['init_lr'] 
-    
-    # create train state
-    tx = optax.adam(learning_rate)
-    state = train_state.TrainState.create(apply_fn=model.apply,
-                                        params=params,
-                                        tx=tx)
-    
-    # load from ckpt
-    if 'ckpt_dir' in config:
-        print(f'Loading checkpoint from : {config["ckpt_dir"]}')
-        state = checkpoints.restore_checkpoint(ckpt_dir=config['ckpt_dir'], target=state)
- 
-    model_components = {
-        'model': model,
-        'render_fn': render_concrete,
-        'render_hvs_fn': render_concrete_hvs,
-        'grad_fn': grad_fn,
-        'state': state,
-    }
-
-    return model_components
+    return nerf_specific
 
 if __name__ == '__main__':
     get_model(100)
