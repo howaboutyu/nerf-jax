@@ -6,7 +6,7 @@ dataset_type: lego
 near: 2.
 far: 6.
 
-scale: 0.05
+scale: 0.4
 num_samples_coarse: 64 
 num_samples_fine: 128 
 use_hvs: True 
@@ -14,9 +14,9 @@ L_position: 10
 L_direction: 4 
 
 num_epochs: 300_000 
-learning_rate: 5.e-6
+learning_rate: 5.e-4
 optimizer: adam
-batch_size: 256 
+batch_size: 1024 
 num_devices: 1
 steps_per_eval: 200
 
