@@ -147,8 +147,8 @@ def train(config: NerfConfig):
    
 
     # summary writer
-    summary_writer = tensorboard.SummaryWriter(config.ckpt_dir)
-    summary_writer.hparams(config.__dict__)
+    summary_writer = tf.summary.create_file_writer(config.ckpt_dir) 
+    #summary_writer.hparams(config.__dict__)
     
    
     key = jax.random.PRNGKey(0)
@@ -169,16 +169,20 @@ def train(config: NerfConfig):
             print(f'Loss {loss}')
         
             key = jax.random.split(key, 1)[0]
-            summary_writer.scalar('train/loss', loss, state.step)  
+
+            with summary_writer.as_default(step=state.step): 
+                tf.summary.scalar('train loss', loss[0], step=state.step)
+                tf.summary.histogram('weights', weights, step=state.step)
+                tf.summary.histogram('ts', ts, step=state.step)
             
+            # Evaluation
             # Take the first image from the val set  
             eval_data = dataset['val'].get(0)
             pred_img, ssim = eval_step(state, key, eval_data, config.batch_size)
-
-            with summary_writer.as_default():
+            with summary_writer.as_default(step=state.step):
                 tf.summary.image('pred_img', pred_img, step=state.step)
-                tf.summary.image('gt_img', eval_data[0], step=state.step)
-                tf.summary.scalar('val ssim', ssim, step=state.step)
+                #tf.summary.image('gt_img', [eval_data[0]], step=state.step)
+                tf.summary.scalar('val ssim', ssim[0], step=state.step)
 
             
 
