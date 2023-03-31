@@ -2,9 +2,11 @@ import jax
 import jax.numpy as jnp
 import optax
 
+import flax
 from flax.training import checkpoints, train_state
+from flax.metrics import tensorboard
 
-
+import tensorflow as tf
 import numpy as np
 import functools
 
@@ -13,98 +15,179 @@ import yaml
 
 from nerf import (
     get_model,
-    get_loss_func,
+    get_nerf,
 )
 
-from utils import get_config
+from utils import get_config, NerfConfig
 from datasets import dataset_factory
 
 
 
-config_path = 'configs/lego.yaml'
-config = get_config(config_path)
 
 
-devices = jax.local_devices()
-print(f'Num devices: {len(devices)}')
-
-print(f'Using config:\n{config}')
-
-
-dataset = dataset_factory(config)
-
-model, params = get_model(config.L_position, config.L_direction)
-
-# create train state
-tx = optax.adam(config.learning_rate)
-state = train_state.TrainState.create(apply_fn=model, params=params, tx=tx) 
-state = jax.device_put_replicated(state, devices)
-
-# create loss function
-loss_func = get_loss_func(
-    model=model,
-    near=config.near,
-    far=config.far,
-    L_position=config.L_position,
-    L_direction=config.L_direction,
-    num_samples_coarse=config.num_samples_coarse,
-    num_samples_fine=config.num_samples_fine,
-    use_hvs=config.use_hvs,
-    use_direction=True,
-    use_random_noise=True,
-)
-
-
-@functools.partial(jax.pmap, axis_name='batch', in_axes=(None, 0, 0, 0, 0)) 
-def train_step( 
-    state,
-    key,
-    origins,
-    directions,
-    rgbs,
-    ):
+def train(config: NerfConfig):
     '''
-    Train step for a single batch of data.
+    Train function
     '''
 
-    def _loss(params):
-        return loss_func(params, key, origins, directions, rgbs)
+    devices = jax.local_devices()
+    print(f'Devices: {devices}')
 
-    # compute loss and grads
-    (loss, rgbs_pred, weights, ts), grads = jax.value_and_grad(_loss, has_aux=True)(state.params)
-
-    # combine grads and loss from all devices
-    grads = jax.lax.pmean(grads, 'batch')
-    loss = jax.lax.pmean(loss, 'batch')
-
-    # apply updates
-    state = state.apply_gradients(grads=grads)
-
-    return state, loss, rgbs_pred, weights, ts 
-
-key = jax.random.PRNGKey(0)
     
-for idx, (img, origins, directions) in enumerate(dataset['train']):
-    print(f'img shape: {img.shape}')
-
-    key_train = jax.random.split(key, img.shape[0])
-
-    print(f'key_train shape: {key_train.shape}')
-    # train step
-    state, loss, rgb_pred, weights, ts = train_step(
-        state,
-        key_train,
-        origins,
-        directions,
-        img,
+    dataset = dataset_factory(config)
+    
+    model, params = get_model(config.L_position, config.L_direction)
+    
+    # create train state
+    tx = optax.adam(learning_rate=config.learning_rate)
+    state = train_state.TrainState.create(apply_fn=model, params=params, tx=tx)
+    
+    # we need to replicate the state to all devices
+    state = flax.jax_utils.replicate(state)
+    
+    # create nerf function
+    nerf_func = get_nerf(
+        near=config.near,
+        far=config.far,
+        L_position=config.L_position,
+        L_direction=config.L_direction,
+        num_samples_coarse=config.num_samples_coarse,
+        num_samples_fine=config.num_samples_fine,
+        use_hvs=config.use_hvs,
+        use_direction=True,
+        use_random_noise=True,
     )
 
-    print(f'loss: {loss}')
 
 
-    key = jax.random.split(key, 1)[0]
+    @functools.partial(jax.pmap, axis_name='batch') 
+    def train_step(state,key, origins, directions,rgbs):
+        '''
+        Train step 
+        '''
+
+        def loss_func(params):
+            (rendered, rendered_hvs), weights, ts = nerf_func(
+                params=params,
+                model_func=model,
+                key=key,
+                origins=origins,
+                directions=directions,
+            )
+            loss = jnp.mean(jnp.square(rendered - rgbs))
+
+            if config.use_hvs:
+                loss += jnp.mean(jnp.square(rendered_hvs - rgbs))
+
+            return loss, (rendered, weights, ts)
+
     
-
+        # compute loss and grads
+        (loss, (rgbs_pred, weights, ts)), grads  = jax.value_and_grad(loss_func, has_aux=True)(params)
     
+        # combine grads and loss from all devices
+        grads = jax.lax.pmean(grads, 'batch')
+        loss = jax.lax.pmean(loss, 'batch')
+    
+        # apply updates on the combined grads
+        state = state.apply_gradients(grads=grads)
+    
+        return state, loss, rgbs_pred, weights, ts 
+    
+    def eval_step(state, key, val_data, eval_batch_size):
+        '''
+        Evaluation step, takes in an entire image and returns the predicted image
+        and also metrics
+        Inputs:
+            state: replicated train state 
+            key: jax random key  
+            val_dtaa: img, origins and directions of rays each with [H, W, 3]
+            eval_batch_size: batch size for evaluation 
+        Outputs:
+            pred_imgs: predicted images [H, W, 3]
+            
+        '''
+        
+        eval_img = val_data[0]
+        eval_origins = val_data[1]
+        eval_directions = val_data[2]
+   
+        # We have to unreplicate the state to evaluate on single device
+        state = flax.jax_utils.unreplicate(state)
+
+        origins_flattened = eval_origins.reshape(-1, 3)
+        directions_flattened = eval_directions.reshape(-1, 3)
+
+        pred_img_parts = []
+        for i in range(0, origins_flattened.shape[0], eval_batch_size):
+            origin = origins_flattened[i:i+eval_batch_size]
+            direction = directions_flattened[i:i+eval_batch_size]
+
+            # expand dim
+            (rendered, rendered_hvs), weights, ts = nerf_func(
+                params=state.params,
+                model_func=state.apply_fn,
+                key=key,
+                origins=origin,
+                directions=direction,
+            )
+
+            pred_img_parts.append(rendered)
 
 
+        pred_img = jnp.concatenate(pred_img_parts, axis=0)
+        pred_img = pred_img.reshape(eval_origins.shape)
+
+        # expand dims tf.ssims expects [B, H, W, C]
+        pred_img = jnp.expand_dims(pred_img, axis=0)
+        eval_img = jnp.expand_dims(eval_img, axis=0)
+
+        ssim = tf.image.ssim(eval_img, pred_img, max_val=1.)
+        return pred_img, ssim
+   
+
+    # summary writer
+    summary_writer = tensorboard.SummaryWriter(config.ckpt_dir)
+    summary_writer.hparams(config.__dict__)
+    
+   
+    key = jax.random.PRNGKey(0)
+    
+    for epoch in range(config.num_epochs):
+        for idx, (img, origins, directions) in enumerate(dataset['train']):
+        
+            key_train = jax.random.split(key, img.shape[0])
+        
+            # train step
+            state, loss, rgb_pred, weights, ts = train_step(
+                state,
+                key_train,
+                origins,
+                directions,
+                img,
+            )
+            print(f'Loss {loss}')
+        
+            key = jax.random.split(key, 1)[0]
+            summary_writer.scalar('train/loss', loss, state.step)  
+            
+            # Take the first image from the val set  
+            eval_data = dataset['val'].get(0)
+            pred_img, ssim = eval_step(state, key, eval_data, config.batch_size)
+
+            with summary_writer.as_default():
+                tf.summary.image('pred_img', pred_img, step=state.step)
+                tf.summary.image('gt_img', eval_data[0], step=state.step)
+                tf.summary.scalar('val ssim', ssim, step=state.step)
+
+            
+
+if __name__ == '__main__':
+    fp = 'configs/lego.yaml'
+    nerf_config = get_config(fp) 
+    train(nerf_config)
+        
+    
+        
+    
+    
