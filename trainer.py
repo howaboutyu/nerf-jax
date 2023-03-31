@@ -1,3 +1,6 @@
+import os
+os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'
+
 import jax
 import jax.numpy as jnp
 import optax
@@ -8,6 +11,7 @@ from flax.metrics import tensorboard
 
 import tensorflow as tf
 tf.config.experimental.set_visible_devices([], 'GPU')
+
 import numpy as np
 import functools
 
@@ -19,14 +23,14 @@ from nerf import (
     get_nerf,
 )
 
-from utils import get_config, NerfConfig
+from nerf_config import get_config, NerfConfig
 from datasets import dataset_factory
 
 
 
 
 
-def train(config: NerfConfig):
+def train_and_evaluate(config: NerfConfig):
     '''
     Train function
     '''
@@ -175,10 +179,10 @@ def train(config: NerfConfig):
 
             with summary_writer.as_default(step=state.step): 
                 tf.summary.scalar('train loss', loss[0], step=state.step)
-        
 
+
+            # Evaluation
             if state.step % config.steps_per_eval == 0:
-                # Evaluation
                 # Take the first image from the val set  
                 eval_data = dataset['val'].get(0)
                 pred_img, ssim = eval_step(state, eval_data, config.batch_size)
@@ -187,6 +191,17 @@ def train(config: NerfConfig):
                     eval_img = jnp.array([eval_data[0]])
                     tf.summary.image('gt_img', eval_img, step=state.step)
                     tf.summary.scalar('val ssim', ssim[0], step=state.step)
+                
+            # Save checkpoint
+            if state.step % config.steps_per_ckpt == 0:
+                # unreplicate the state
+                unreplicated_state = flax.jax_utils.unreplicate(state)
+                checkpoint.save_checkpoint(
+                    config.ckpt_dir,
+                    unreplicted_state,
+                    step=unreplicated_state.step,
+                    keep=3, # <- keep last 3 checkpoints
+                )
 
             
 

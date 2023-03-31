@@ -13,7 +13,7 @@ from typing import List, Any
 import numpy as np
 import time
 
-from utils import NerfConfig 
+from nerf_config import NerfConfig 
 
 
 def get_rays(H, W, focal, pose):

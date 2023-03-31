@@ -1,8 +1,13 @@
+import os
+os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'
+
 import pytest
 import yaml
 
 
-from utils import get_config
+from nerf_config import get_config
+
+from trainer import train_and_evaluate 
 
 
 def test_get_config():
