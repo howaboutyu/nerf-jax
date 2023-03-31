@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class Config:
+class NerfConfig:
 
     dataset_name: str
     dataset_path: str
@@ -37,5 +37,5 @@ def load_config(config_file):
 
 def get_config(config_file):
     config = load_config(config_file)
-    return Config(**config)
+    return NerfConfig(**config)
 
