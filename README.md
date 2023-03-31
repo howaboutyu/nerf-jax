@@ -1,5 +1,21 @@
 # nerf-Jax                  
 
+## Install jax on GPU
+
+For CUDA 11 simply run
+
+```bash
+./scripts/setup_jax.sh
+```
+
+and for TPU-vm
+
+```bash
+./script/setup_tpu.sh
+```
+
+# 
+
 ## Data - video to Nerf dataset
 
 Conversion from video files to nerf datasets requires a GPU. You can convert it locally - if you have a GPU locally - or on the google cloud platform.
