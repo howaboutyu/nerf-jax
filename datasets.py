@@ -13,7 +13,7 @@ from typing import List, Any
 import numpy as np
 import time
 
-from utils import Config 
+from utils import NerfConfig 
 
 
 def get_rays(H, W, focal, pose):
@@ -82,7 +82,6 @@ class Dataset:
                 
                 while len(img_batch) < self.num_devices: 
                     rand_image_selector = np.random.randint(0, len(self.imgs))
-                    print(f'Getting image index : {rand_image_selector}')
                     if rand_image_selector not in self.cache:
                         img, origins, directions = self.get(rand_image_selector)
                         origins = origins.reshape((-1, 3))
@@ -107,7 +106,6 @@ class Dataset:
                     self.n += 1
                     self.key, _ = jax.random.split(self.key)
                 toc = time.perf_counter()
-                print(f"getting one batch took {toc - tic:0.4f} seconds")
                 return jnp.array(img_batch), jnp.array(origins_batch), jnp.array(directions_batch)
             else:
                 raise StopIteration
@@ -237,7 +235,7 @@ class Dataset:
 
 class LegoDataset(Dataset): 
     
-    def __init__(self, config: Config, subset: str):
+    def __init__(self, config: NerfConfig, subset: str):
 
         self.data_path = config.dataset_path
         self.subset = subset 
@@ -303,7 +301,7 @@ class LLFF(Dataset):
     '''
     '''
     
-    def __init__(self, config: Config, subset: str='train'):
+    def __init__(self, config: NerfConfig, subset: str='train'):
          
         
         self.normalizer = lambda x : x / 255.
