@@ -7,6 +7,7 @@ from flax.training import checkpoints, train_state
 from flax.metrics import tensorboard
 
 import tensorflow as tf
+tf.config.experimental.set_visible_devices([], 'GPU')
 import numpy as np
 import functools
 
@@ -69,11 +70,12 @@ def train(config: NerfConfig):
         def loss_func(params):
             (rendered, rendered_hvs), weights, ts = nerf_func(
                 params=params,
-                model_func=model,
+                model_func=state.apply_fn,
                 key=key,
                 origins=origins,
                 directions=directions,
             )
+            
             loss = jnp.mean(jnp.square(rendered - rgbs))
 
             if config.use_hvs:
@@ -83,7 +85,7 @@ def train(config: NerfConfig):
 
     
         # compute loss and grads
-        (loss, (rgbs_pred, weights, ts)), grads  = jax.value_and_grad(loss_func, has_aux=True)(params)
+        (loss, (rgbs_pred, weights, ts)), grads  = jax.value_and_grad(loss_func, has_aux=True)(state.params)
     
         # combine grads and loss from all devices
         grads = jax.lax.pmean(grads, 'batch')
@@ -124,7 +126,7 @@ def train(config: NerfConfig):
         for i in range(0, origins_flattened.shape[0], eval_batch_size):
             origin = origins_flattened[i:i+eval_batch_size]
             direction = directions_flattened[i:i+eval_batch_size]
-
+            
             # expand dim
             (rendered, rendered_hvs), weights, ts = nerf_func(
                 params=state.params,
@@ -133,7 +135,7 @@ def train(config: NerfConfig):
                 origins=origin,
                 directions=direction,
             )
-
+            
             pred_img_parts.append(rendered)
 
 
@@ -159,7 +161,7 @@ def train(config: NerfConfig):
         for idx, (img, origins, directions) in enumerate(dataset['train']):
         
             key_train = jax.random.split(key, img.shape[0])
-        
+            key, _ = jax.random.split(key)
             # train step
             state, loss, rgb_pred, weights, ts = train_step(
                 state,
@@ -168,7 +170,7 @@ def train(config: NerfConfig):
                 directions,
                 img,
             )
-            print(f'Loss {loss}')
+            print(f'Loss {loss} at {state.step}')
         
 
             with summary_writer.as_default(step=state.step): 
@@ -182,7 +184,8 @@ def train(config: NerfConfig):
                 pred_img, ssim = eval_step(state, eval_data, config.batch_size)
                 with summary_writer.as_default(step=state.step):
                     tf.summary.image('pred_img', pred_img, step=state.step)
-                    #tf.summary.image('gt_img', [eval_data[0]], step=state.step)
+                    eval_img = jnp.array([eval_data[0]])
+                    tf.summary.image('gt_img', eval_img, step=state.step)
                     tf.summary.scalar('val ssim', ssim[0], step=state.step)
 
             
