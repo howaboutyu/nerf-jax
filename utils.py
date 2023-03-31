@@ -24,6 +24,7 @@ class NerfConfig:
     num_epochs: int = 100
     learning_rate: float = 0.0001
     optimizer: str = 'adam'
+    steps_per_eval: int = 20 
 
     ckpt_dir: str = 'checkpoints'
 
