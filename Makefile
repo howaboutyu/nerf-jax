@@ -101,4 +101,5 @@ list_vm:
 	gcloud compute instances list
 
 
-
+test:
+	CUDA_VISIBLE_DEVICES=-1 python3 -m pytest test*

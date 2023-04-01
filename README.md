@@ -25,7 +25,8 @@ For JAX installation, refer to the official [installation documentation](https:/
 Convert a video file to a NeRF dataset using the following command on your local machine:
 
 ```bash
-sudo docker run --gpus all -v`pwd`:/nerf -i bmild/tf_colmap bash -c \
+docker pull bmild/tf_colmap
+docker run --gpus all -v`pwd`:/nerf -i bmild/tf_colmap bash -c \
 		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.png; \
 		python /nerf/LLFF/imgs2poses.py /nerf/$(OUT_PATH)"
 ```
