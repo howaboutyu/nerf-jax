@@ -55,6 +55,10 @@ class Dataset:
     poses: List[jnp.array] = field(default_factory=lambda: [])
     key: Any = field(default_factory=jax.random.PRNGKey(0))
 
+    @property
+    def num_examples(self):
+        return len(self.imgs)
+
     def get(self, idx):
         img = self.imgs[idx]
         pose = self.poses[idx]
