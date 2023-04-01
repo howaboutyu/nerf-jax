@@ -1,57 +1,54 @@
 [![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
 
-# nerf-Jax                  
+# nerf-Jax
+This repository contains a JAX implementation of the NeRF algorithm for synthesizing novel views of a scene from sparse input views. It provides functionality for converting video files to NeRF datasets, training and evaluating NeRF models on GPU and TPU-VM.
 
-## Install jax on GPU
-
-For CUDA 11 simply run
+## Installation 
 
 ```bash
-./scripts/setup_jax.sh
+pip install -r requirements.txt
+apt install libgl1 # for opencv
 ```
 
-and for TPU-vm
+
+### Jax
+
+Please refer to the offical install [documentation](https://github.com/google/jax#installation)
+
+
+
+## Data - Video to Nerf Dataset
+To convert video files to Nerf datasets, a GPU is required because `COLMAP` currently requires a GPU. 
+
+### Local Conversion
+To convert a video file to a Nerf dataset on your local machine, you can use the following command:
 
 ```bash
-./script/setup_tpu.sh
+make vid_to_nerf VID_FILE=path/to/video_file OUT_PATH=path/to/output_folder
 ```
 
-# 
+This command will use a Docker container to run the necessary conversion scripts. The output folder will contain a set of images and poses.
 
-## Data - video to Nerf dataset
-
-Conversion from video files to nerf datasets requires a GPU. You can convert it locally - if you have a GPU locally - or on the google cloud platform.
-
-
-### Cloud GPU example
+### Cloud Conversion
+To convert a video file to a Nerf dataset on the Google Cloud Platform, you can use the following commands:
 
 ```bash
-# 1) Setup
-make start_gpu_convert:
-# 2) Convert 
-make vid_to_nerf_cloud VID_FILE=IMG_123.MOV OUT_PATH=IMG_123
-# 3) Delete gpu vm 
+# 1) Create a GPU VM and run setup scripts
+make start_gpu_convert
+
+# 2) Convert the video file to a Nerf dataset
+make vid_to_nerf_cloud VID_FILE=path/to/video_file OUT_PATH=path/to/output_folder
+
+# 3) Delete the GPU VM
 make delete_gpu_vm
 ```
-After, you will have a folder of images and poses in the specified `OUT_PATH` folder.
 
-### Local GPU example
-WIP
-
-
-## Training - GPU and TPU
-WIP
-
-First, create a TPU-VM; by default, it is a preemptible TPU.
+## Training 
 
 ```bash
-make create_gpu_vm
+python main.py --config_file=<config file>
 ```
 
-Then you can start training. In the example below, the specified `CONFIG_PATH` should exist locally and has Nerf configuration parameters, and `DATA_PATH` is the output of the video-to-nerf data generation scripts outlined above.
+where <config file> is the path to the configuration file containing the necessary parameters for the training. 
 
-```bash
-make train_tpu CONFIG_PATH=configs/tpu.YAML DATA_PATH=miso_shop
-```
 
-After running this command, the training will start on the TPU-VM within a `tmux` session called `nerf`. `ssh` into the VM and attach to the session to see the logs (`tmux a -t nerf`).
