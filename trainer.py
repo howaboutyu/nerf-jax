@@ -19,9 +19,14 @@ from datasets import dataset_factory
 
 def train_and_evaluate(config: NerfConfig):
     """
-    Train and evaluate the model
-    Inputs:
-        config: NerfConfig object with all the hyperparameters
+    Trains and evaluates a NeRF model on a given dataset using the hyperparameters
+    specified in the provided `config` object.
+
+    Args:
+        config (NerfConfig): A `NerfConfig` object containing all the necessary hyperparameters.
+
+    Returns:
+        None
     """
 
     devices = jax.local_devices()
