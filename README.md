@@ -1,3 +1,5 @@
+[![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
+
 # nerf-Jax                  
 
 ## Install jax on GPU
