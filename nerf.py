@@ -465,5 +465,3 @@ def get_nerf(
     return nerf_specific
 
 
-if __name__ == "__main__":
-    get_model(100)

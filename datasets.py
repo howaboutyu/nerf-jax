@@ -418,13 +418,4 @@ def dataset_factory(config):
         }
 
 
-if __name__ == "__main__":
-    import yaml
 
-    with open("configs/beer.yaml") as file:
-        config = yaml.safe_load(file)
-
-    dataset = LLFF(config=config, subset="render")
-
-    for p in dataset.poses:
-        print(p.shape)

@@ -214,7 +214,4 @@ def train_and_evaluate(config: NerfConfig):
                 return
 
 
-if __name__ == "__main__":
-    fp = "configs/lego.yaml"
-    nerf_config = get_config(fp)
-    train_and_evaluate(nerf_config)
+
