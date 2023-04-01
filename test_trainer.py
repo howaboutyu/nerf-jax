@@ -1,5 +1,5 @@
 import os
-os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'
+os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=3'
 
 import pytest
 import yaml
@@ -21,3 +21,16 @@ def test_get_config():
     assert config.dataset_name == 'lego'
 
 
+def test_train_and_evaluate():
+    config_path = 'configs/lego.yaml'
+
+    nerf_config = get_config(config_path)
+
+    nerf_config.epochs = 1
+    nerf_config.batch_size = 8 
+    nerf_config.num_devices = 3
+
+
+    train_and_evaluate(nerf_config)
+
+    assert True
