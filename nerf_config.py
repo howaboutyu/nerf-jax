@@ -19,15 +19,17 @@ class NerfConfig:
     num_samples_coarse: int = 64
     num_samples_fine: int = 128 
 
-    batch_size: int = 1024 # <-- this is the batch size per device
-    num_devices: int = 1 # <-- this is the number of devices
+    batch_size: int = 1024 # <-- batch size per device
+    num_devices: int = 1 # <-- number of devices
     num_epochs: int = 100
     learning_rate: float = 0.0001
     optimizer: str = 'adam'
-    steps_per_eval: int = 100 # <-- this is the number of steps per evaluation
-    steps_per_ckpt: int = 100 # <-- this is the number of steps per checkpoint
 
-    ckpt_dir: str = 'checkpoints'
+
+    steps_per_eval: int = 100 # <-- number of steps per evaluation
+    steps_per_ckpt: int = 100 # <-- number of steps per checkpoint
+    ckpt_dir: str = 'checkpoints' # <-- directory where checkpoints are saved
+    load_ckpt_dir: str = None # <-- directory where checkpoints are loaded from
 
 
 
