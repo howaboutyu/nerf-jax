@@ -212,6 +212,3 @@ def train_and_evaluate(config: NerfConfig):
                     f"Finished training and eval at step {state.step} due to max_steps"
                 )
                 return
-
-
-

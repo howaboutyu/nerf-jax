@@ -416,6 +416,3 @@ def dataset_factory(config):
             "val": LLFF(config, subset="val"),
             "render": LLFF(config, subset="render"),
         }
-
-
-
