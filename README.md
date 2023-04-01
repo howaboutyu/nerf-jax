@@ -25,19 +25,6 @@ make vid_to_nerf VID_FILE=path/to/video_file OUT_PATH=path/to/output_folder
 
 This command will use the docker image from [LLFF](https://github.com/Fyusion/LLFF) to run the necessary conversion scripts. The output folder will contain a set of images and poses.
 
-### Cloud Conversion
-To convert a video file to a Nerf dataset on the Google Cloud Platform, you can use the following commands:
-
-```bash
-# 1) Create a GPU VM and run setup scripts
-make start_gpu_convert
-
-# 2) Convert the video file to a Nerf dataset
-make vid_to_nerf_cloud VID_FILE=path/to/video_file OUT_PATH=path/to/output_folder
-
-# 3) Delete the GPU VM
-make delete_gpu_vm
-```
 
 ## Training 
 
