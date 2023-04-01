@@ -172,6 +172,19 @@ def train_and_evaluate(config: NerfConfig):
         use_random_noise=True,
     )
 
+    # eval nerf function, no random noise for volume density
+    eval_nerf_func = get_nerf(
+        near=config.near,
+        far=config.far,
+        L_position=config.L_position,
+        L_direction=config.L_direction,
+        num_samples_coarse=config.num_samples_coarse,
+        num_samples_fine=config.num_samples_fine,
+        use_hvs=config.use_hvs,
+        use_direction=True,
+        use_random_noise=False,
+    )
+
     # create pmapped train_step
     p_train_step = jax.pmap(
         functools.partial(train_step, nerf_func=nerf_func, use_hvs=config.use_hvs),
@@ -211,7 +224,7 @@ def train_and_evaluate(config: NerfConfig):
                 # Take the first image from the val set
                 eval_data = dataset["val"].get(0)
                 pred_img, ssim = eval_step(
-                    nerf_func, state, eval_data, config.batch_size
+                    eval_nerf_func, state, eval_data, config.batch_size
                 )
                 with summary_writer.as_default(step=state.step):
                     tf.summary.image("pred_img", pred_img[..., ::-1], step=state.step)
