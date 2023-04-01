@@ -26,9 +26,6 @@ class Config:
 
 @pytest.fixture
 def dummy_data():
-    #origins = jnp.ones((Config.batch_size, Config.num_samples_coarse, 3))
-    #directions = jnp.ones((Config.batch_size, Config.num_samples_coarse, 3))
-
     origins = jnp.ones((Config.batch_size, 3))
     directions = jnp.ones((Config.batch_size, 3))
 
@@ -39,9 +36,7 @@ def dummy_data():
     weights = jnp.ones((Config.batch_size, Config.num_samples_coarse))
 
 
-
     model, params = get_model(10, 4)
-
 
     return model, params, origins, directions, points, t, weights
 
@@ -163,7 +158,7 @@ def test_render_fn(dummy_data):
     assert rendered.shape == (Config.batch_size, 3)
 
 
-def test_loss_fn(dummy_data):
+def test_nerf_fn(dummy_data):
 
     key = jax.random.PRNGKey(0)
     
@@ -172,21 +167,6 @@ def test_loss_fn(dummy_data):
 
     origins = jnp.ones((Config.batch_size, 3))
     directions = jnp.ones((Config.batch_size, 3))
-
-    #loss, (rendered, weights, t) = loss_func(
-    #    params=params,
-    #    model_func=model,
-    #    key=key,
-    #    origins=origins,
-    #    directions=directions,
-    #    near=Config.near,
-    #    far=Config.far,
-    #    L_position=Config.L_position,
-    #    L_direction=Config.L_direction,
-    #    num_samples_coarse=Config.num_samples_coarse,
-    #    num_samples_fine=Config.num_samples_fine,
-    #    expected_rgb=jnp.ones((Config.batch_size, 3)),
-    #    use_hvs=True)
 
     nerf_fn = get_nerf(
         Config.near,
@@ -209,9 +189,9 @@ def test_loss_fn(dummy_data):
     )
         
 
-    #assert loss.shape == ()
-    #assert rendered.shape == (Config.batch_size, 3)
-    #assert weights.shape == (Config.batch_size, Config.num_samples_fine + Config.num_samples_coarse, 1)
+    assert rendered[0].shape == (Config.batch_size, 3)
+    assert rendered[1].shape == (Config.batch_size, 3)
+    assert weights.shape == (Config.batch_size, Config.num_samples_fine + Config.num_samples_coarse, 1)
 
         
 
