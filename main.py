@@ -1,4 +1,3 @@
-
 import tensorflow as tf
 import jax
 from absl import app, flags
@@ -13,9 +12,8 @@ flags.mark_flag_as_required("config_path")
 
 
 def main(argv):
-
-    # Remove GPUs for tf 
-    tf.config.experimental.set_visible_devices([], 'GPU')
+    # Remove GPUs for tf
+    tf.config.experimental.set_visible_devices([], "GPU")
 
     # Load config from yaml file
     config = get_config(FLAGS.config_path)
@@ -24,5 +22,5 @@ def main(argv):
     train_and_evaluate(config)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(main)
