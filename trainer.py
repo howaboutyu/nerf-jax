@@ -179,8 +179,14 @@ def train_and_evaluate(config: NerfConfig):
                 img,
             )
 
-            with summary_writer.as_default(step=state.step): 
-                tf.summary.scalar('train loss', loss[0], step=state.step)
+            if state.step % config.log_every == 0:
+                print(f'Iteration: {idx}, Loss: {loss}')
+                with summary_writer.as_default():
+                    tf.summary.scalar('train_loss', loss[0], step=state.step)
+
+                    # histogram of weights[0] and ts[0]
+                    tf.summary.histogram('weights', weights[0], step=state.step)
+                    tf.summary.histogram('ts', ts[0], step=state.step)
 
 
             # Evaluation
@@ -198,14 +204,16 @@ def train_and_evaluate(config: NerfConfig):
             if state.step > 0 and state.step % config.steps_per_ckpt == 0:
                 # unreplicate the state
                 unreplicated_state = flax.jax_utils.unreplicate(state)
-                checkpoint.save_checkpoint(
+                checkpoints.save_checkpoint(
                     config.ckpt_dir,
-                    unreplicted_state,
+                    unreplicated_state,
                     step=unreplicated_state.step,
                     keep=3, # <- keep last 3 checkpoints
                 )
-
             
+            if state.step > config.max_steps:
+                print(f'Finished training and eval at step {state.step} due to max_steps')
+                return 
 
 if __name__ == '__main__':
     fp = 'configs/lego.yaml'
