@@ -23,7 +23,7 @@ To convert a video file to a Nerf dataset on your local machine, you can use the
 make vid_to_nerf VID_FILE=path/to/video_file OUT_PATH=path/to/output_folder
 ```
 
-This command will use the docker image from [LLFF](https://github.com/Fyusion/LLFF) to run the necessary conversion scripts. The output folder will contain a set of images and poses.
+This command will use the docker image from [LLFF](https://github.com/Fyusion/LLFF) to run the necessary conversion scripts. 
 
 
 ## Training 
