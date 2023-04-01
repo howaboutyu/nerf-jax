@@ -1,5 +1,3 @@
-import os
-os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'
 
 import jax
 import jax.numpy as jnp
@@ -32,20 +30,25 @@ from datasets import dataset_factory
 
 def train_and_evaluate(config: NerfConfig):
     '''
-    Train function
+    Train and evaluate the model
+    Inputs:
+        config: NerfConfig object with all the hyperparameters
+
     '''
 
     devices = jax.local_devices()
     print(f'Devices: {devices}')
-
-    
+ 
     dataset = dataset_factory(config)
     
     model, params = get_model(config.L_position, config.L_direction)
     
-    # create train state
-    tx = optax.adam(learning_rate=config.learning_rate)
-    state = train_state.TrainState.create(apply_fn=model, params=params, tx=tx)
+    if config.load_ckpt_dir is not None:
+        state = checkpoints.restore_checkpoint(config.load_ckpt_dir, target=None)
+    else:
+        # create train state
+        tx = optax.adam(learning_rate=config.learning_rate)
+        state = train_state.TrainState.create(apply_fn=model, params=params, tx=tx)
     
     # we need to replicate the state to all devices
     state = flax.jax_utils.replicate(state)
@@ -63,10 +66,8 @@ def train_and_evaluate(config: NerfConfig):
         use_random_noise=True,
     )
 
-
-
     @functools.partial(jax.pmap, axis_name='batch') 
-    def train_step(state,key, origins, directions,rgbs):
+    def train_step(state, key, origins, directions,rgbs):
         '''
         Train step 
         '''
@@ -103,7 +104,8 @@ def train_and_evaluate(config: NerfConfig):
     def eval_step(state, val_data, eval_batch_size):
         '''
         Evaluation step, takes in an entire image and returns the predicted image
-        and also metrics
+        and also metrics. This is single device evaluation 
+        
         Inputs:
             state: replicated train state 
             val_dtaa: img, origins and directions of rays each with [H, W, 3]
@@ -162,6 +164,8 @@ def train_and_evaluate(config: NerfConfig):
     key = jax.random.PRNGKey(0)
     
     for epoch in range(config.num_epochs):
+        print(f'Epoch: {epoch}')
+
         for idx, (img, origins, directions) in enumerate(dataset['train']):
         
             key_train = jax.random.split(key, img.shape[0])
@@ -174,15 +178,13 @@ def train_and_evaluate(config: NerfConfig):
                 directions,
                 img,
             )
-            print(f'Loss {loss} at {state.step}')
-        
 
             with summary_writer.as_default(step=state.step): 
                 tf.summary.scalar('train loss', loss[0], step=state.step)
 
 
             # Evaluation
-            if state.step % config.steps_per_eval == 0:
+            if state.step > 0 and state.step % config.steps_per_eval == 0:
                 # Take the first image from the val set  
                 eval_data = dataset['val'].get(0)
                 pred_img, ssim = eval_step(state, eval_data, config.batch_size)
@@ -193,7 +195,7 @@ def train_and_evaluate(config: NerfConfig):
                     tf.summary.scalar('val ssim', ssim[0], step=state.step)
                 
             # Save checkpoint
-            if state.step % config.steps_per_ckpt == 0:
+            if state.step > 0 and state.step % config.steps_per_ckpt == 0:
                 # unreplicate the state
                 unreplicated_state = flax.jax_utils.unreplicate(state)
                 checkpoint.save_checkpoint(
@@ -208,7 +210,7 @@ def train_and_evaluate(config: NerfConfig):
 if __name__ == '__main__':
     fp = 'configs/lego.yaml'
     nerf_config = get_config(fp) 
-    train(nerf_config)
+    train_and_evaluate(nerf_config)
         
     
         
