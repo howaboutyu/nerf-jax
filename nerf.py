@@ -25,6 +25,28 @@ def encoding_func(x, L):
     return jnp.concatenate(encoded_array, -1)
 
 
+def inverse_sample(Z, cdf, t_to_sample):
+    """
+    Samples from the inverse CDF using the inverse transform sampling method.
+    Inputs:
+        Z (jnp.ndarray): Random numbers from a uniform distribution U(0, 1). Shape: (batch_size, num_to_sample)
+        cdf (jnp.ndarray): The CDF of the distribution to sample from. Shape: (batch_size, num_samples)
+        t_to_sample (jnp.ndarray): The points to sample from the distribution. Shape: (batch_size, num_fine_samples)
+
+    Outputs:
+        sampled_t (jnp.ndarray): The sampled points from the distribution. Shape: (batch_size, num_to_sample)
+
+    Where num_to_sample = Z.shape[1]
+    """
+    abs_diff = jnp.abs(cdf[..., jnp.newaxis, :] - Z[..., jnp.newaxis])
+
+    argmin = jnp.argmin(abs_diff, 1)
+
+    sampled_t = jnp.take_along_axis(t_to_sample, argmin, 1)
+
+    return sampled_t
+
+
 def hvs(weights, t, t_to_sample, key):
     """Hierarchical volume sampling
     Inputs:
@@ -43,25 +65,6 @@ def hvs(weights, t, t_to_sample, key):
     pdf = weights / norm[..., jnp.newaxis]
 
     cdf = jnp.cumsum(pdf, -1)
-
-    def inverse_sample(Z, cdf, t_to_sample):
-        # Sample from the inverse CDF using inverse transform sampling method
-        # Inputs:
-        #   Z : numbers from a uniform distribution U(0,1)
-        #   cdf : CDF of the distribution to sample from
-        #   t_to_sample : points to sample from the distribution
-        # Outputs:
-        #   sampled_t : sampled points from the distribution
-
-        abs_diff = jnp.abs(cdf[..., jnp.newaxis, :] - Z[..., jnp.newaxis])
-
-        argmin = jnp.argmin(abs_diff, 1)
-
-        # expand argmin to match the shape of t_to_sample
-
-        sampled_t = jnp.take_along_axis(t_to_sample, argmin, 1)
-
-        return sampled_t
 
     # t with hvs
     t_hvs = [t]
@@ -463,5 +466,3 @@ def get_nerf(
     )
 
     return nerf_specific
-
-
