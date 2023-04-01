@@ -196,9 +196,9 @@ def train_and_evaluate(config: NerfConfig):
                 eval_data = dataset["val"].get(0)
                 pred_img, ssim = eval_step(state, eval_data, config.batch_size)
                 with summary_writer.as_default(step=state.step):
-                    tf.summary.image("pred_img", pred_img, step=state.step)
+                    tf.summary.image("pred_img", pred_img[..., ::-1], step=state.step)
                     eval_img = jnp.array([eval_data[0]])
-                    tf.summary.image("gt_img", eval_img, step=state.step)
+                    tf.summary.image("gt_img", eval_img[..., ::-1], step=state.step)
                     tf.summary.scalar("val ssim", ssim[0], step=state.step)
 
             # Save checkpoint
