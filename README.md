@@ -1,21 +1,17 @@
 [![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
 
 # nerf-Jax
-This repository contains a JAX implementation of the NeRF algorithm for synthesizing novel views of a scene from sparse input views. It provides functionality for converting video files to NeRF datasets, training and evaluating NeRF models on GPU and TPU-VM.
+This repository contains a JAX implementation of the NeRF [paper](https://arxiv.org/abs/2003.08934) for synthesizing novel views of a scene from sparse input views. It provides functionality for converting your video files to NeRF datasets, training and evaluating NeRF models on GPU and TPU-VM.
 
 ## Installation 
 
 ```bash
 pip install -r requirements.txt
 apt install libgl1 # for opencv
+
 ```
 
-
-### Jax
-
-Please refer to the offical install [documentation](https://github.com/google/jax#installation)
-
-
+For `jax` installation refer to the offical install [documentation](https://github.com/google/jax#installation)
 
 ## Data - Video to Nerf Dataset
 To convert video files to Nerf datasets, a GPU is required because `COLMAP` currently requires a GPU. 
@@ -27,7 +23,7 @@ To convert a video file to a Nerf dataset on your local machine, you can use the
 make vid_to_nerf VID_FILE=path/to/video_file OUT_PATH=path/to/output_folder
 ```
 
-This command will use a Docker container to run the necessary conversion scripts. The output folder will contain a set of images and poses.
+This command will use the docker image from [LLFF](https://github.com/Fyusion/LLFF) to run the necessary conversion scripts. The output folder will contain a set of images and poses.
 
 ### Cloud Conversion
 To convert a video file to a Nerf dataset on the Google Cloud Platform, you can use the following commands:
