@@ -13,7 +13,7 @@ use_hvs: True
 L_position: 10 
 L_direction: 4 
 
-num_epochs: 300_000 
+num_epochs: 20_000
 learning_rate: 5.e-4
 optimizer: adam
 batch_size: 1024 
@@ -22,6 +22,4 @@ steps_per_eval: 2000
 
 ckpt_dir: 'ckpt_lego_dir'
 load_ckpt_dir: 'ckpt_lego_dir'
-
-
 

@@ -26,7 +26,7 @@ class NerfConfig:
     max_steps: int = 1e6
     steps_per_eval: int = 100  # <-- number of steps per evaluation
     steps_per_ckpt: int = 100  # <-- number of steps per checkpoint
-    log_every: int = 10  # <-- number of steps per log
+    log_every: int = 100  # <-- number of steps per log
     ckpt_dir: str = "checkpoints"  # <-- directory where checkpoints are saved
     load_ckpt_dir: str = None  # <-- directory where checkpoints are loaded from
 
