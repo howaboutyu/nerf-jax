@@ -314,9 +314,34 @@ def nerf(
     use_direction=True,
     use_random_noise=True,
 ):
-    """ """
+    """This function implements neural radiance fields (NeRF) algorithm for rendering.
 
-    batch_size = origins.shape[0]
+    Inputs:
+        params : model parameters
+        key : random key
+        origins : origin of rays, shape (batch_size, 3)
+        directions : direction of rays, shape (batch_size, 3)
+        model_func : function that maps encoded points and directions to rgb and density
+        near : near plane of the camera
+        far : far plane of the camera
+        L_position : number of frequencies to encode for points
+        L_direction : number of frequencies to encode for directions
+        num_samples_coarse : number of coarse samples for rendering
+        num_samples_fine : number of fine samples for rendering if use_hvs is True
+        use_hvs : whether to use hierarchical volume sampling for rendering
+        use_direction : whether to use directions for encoding and rendering
+        use_random_noise : whether to add random noise to density for rendering
+    Outputs:
+        If use_hvs is True, returns a tuple of 2 tensors:
+        - rendered: first element is from coarse rendering, second element is from fine rendering
+        - weights_hvs: weights of the distribution at coarse and fine samples
+        - t_hvs: t-values at coarse and fine samples
+
+        If use_hvs is False, returns a tuple of 2 tensors:
+        - rendered: both elements are from coarse rendering
+        - weights_coarse: weights of the distribution at coarse samples
+        - t: t-values at coarse samples
+    """
 
     # get points for coarse
     points, t, origins_ray, directions_ray = get_points(
@@ -398,10 +423,30 @@ def get_nerf(
     use_random_noise=True,
 ):
     """
-    This function returns a nerf function with the given parameters
-    Example:
-        nerf = get_nerf(0.1, 10, 4, 4, 64, 128, True, True, True)
-        nerf(params, key, origins, directions)
+    Returns a partial function `nerf_specific` that renders a scene using a NeRF model
+    with the given parameters.
+
+    Inputs:
+        near (float): The distance to the near clipping plane.
+        far (float): The distance to the far clipping plane.
+        L_position (int): The number of frequencies to encode for each position coordinate.
+        L_direction (int): The number of frequencies to encode for each direction coordinate.
+        num_samples_coarse (int): The number of coarse samples to use for rendering.
+        num_samples_fine (int): The number of fine samples to use for rendering, if hierarchical
+            volume sampling (HVS) is enabled.
+        use_hvs (bool): Whether to use hierarchical volume sampling (HVS) during rendering.
+        use_direction (bool, optional): Whether to use the direction information when rendering.
+            Defaults to True.
+        use_random_noise (bool, optional): Whether to add random noise to the density when rendering.
+            Defaults to True.
+
+    Outputs:
+        A partial function `nerf_specific` that renders a scene using a NeRF model with the given
+        parameters when called with the following arguments:
+        - params: The parameters of the NeRF model.
+        - key: A random key used for generating random numbers during rendering.
+        - origins: The origin points of the rays to be cast.
+        - directions: The direction vectors of the rays to be cast.
     """
 
     nerf_specific = functools.partial(
