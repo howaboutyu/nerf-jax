@@ -1,26 +1,18 @@
 import jax
 import jax.numpy as jnp
 import optax
-
 import flax
 from flax.training import checkpoints, train_state
 from flax.metrics import tensorboard
-
 import tensorflow as tf
-
-tf.config.experimental.set_visible_devices([], "GPU")
-
 import numpy as np
 import functools
-
-
 import yaml
 
 from nerf import (
     get_model,
     get_nerf,
 )
-
 from nerf_config import get_config, NerfConfig
 from datasets import dataset_factory
 
@@ -30,7 +22,6 @@ def train_and_evaluate(config: NerfConfig):
     Train and evaluate the model
     Inputs:
         config: NerfConfig object with all the hyperparameters
-
     """
 
     devices = jax.local_devices()
@@ -66,7 +57,19 @@ def train_and_evaluate(config: NerfConfig):
     @functools.partial(jax.pmap, axis_name="batch")
     def train_step(state, key, origins, directions, rgbs):
         """
-        Train step
+        Train step, this function is replicated to all devices
+        Inputs:
+            state: train state
+            key: random key
+            origins: origins of rays [num_devices, batch_size, 3]
+            directions: directions of rays [num_devices, batch_size, 3]
+            rgbs: rgb values of rays [num_devices, batch_size, 3]
+        Outputs:
+            state: updated train state
+            loss: loss value
+            rgb_pred: predicted rgb values
+            weights: weights of the rays
+            ts: parametric values of the ray
         """
 
         def loss_func(params):
