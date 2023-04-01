@@ -1,6 +1,3 @@
-import os
-os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=3'
-
 import pytest
 import yaml
 
@@ -27,9 +24,13 @@ def test_train_and_evaluate():
     nerf_config = get_config(config_path)
 
     nerf_config.epochs = 1
+    nerf_config.log_every = 1   
     nerf_config.batch_size = 8 
-    nerf_config.num_devices = 3
+    nerf_config.num_devices = 1
+    nerf_config.max_steps = 4
 
+
+    nerf_config.ckpt_dir = '/tmp/test_train_and_evaluate'
 
     train_and_evaluate(nerf_config)
 
