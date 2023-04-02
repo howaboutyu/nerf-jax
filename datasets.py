@@ -41,6 +41,72 @@ def get_rays(H, W, focal, pose):
     return origin, direction
 
 
+# Modified from : https://github.com/bmild/nerf/blob/master/tiny_nerf.ipynb
+def trans(x=0, y=0, z=0):
+    return jnp.array(
+        [
+            [1, 0, 0, x],
+            [0, 1, 0, y],
+            [0, 0, 1, z],
+            [0, 0, 0, 1],
+        ],
+        dtype=jnp.float32,
+    )
+
+
+def rot_phi(phi):
+    return jnp.array(
+        [
+            [1, 0, 0, 0],
+            [0, jnp.cos(phi), -jnp.sin(phi), 0],
+            [0, jnp.sin(phi), jnp.cos(phi), 0],
+            [0, 0, 0, 1],
+        ],
+        dtype=jnp.float32,
+    )
+
+
+def rot_theta(th):
+    return jnp.array(
+        [
+            [jnp.cos(th), 0, -jnp.sin(th), 0],
+            [0, 1, 0, 0],
+            [jnp.sin(th), 0, jnp.cos(th), 0],
+            [0, 0, 0, 1],
+        ],
+        dtype=jnp.float32,
+    )
+
+
+def rot_z(th):
+    return jnp.array(
+        [
+            [jnp.cos(th), -jnp.sin(th), 0, 0],
+            [jnp.sin(th), jnp.cos(th), 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ],
+        dtype=jnp.float32,
+    )
+
+
+def pose_spherical(theta, phi, radius):
+    c2w = trans(z=radius)
+    c2w = rot_phi(phi / 180.0 * np.pi) @ c2w
+    c2w = rot_theta(theta / 180.0 * np.pi) @ c2w
+    c2w = jnp.array([[-1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]]) @ c2w
+    return c2w
+
+
+def generate_render_poses(thetas, phis, radii):
+    num_poses = len(thetas)
+    new_poses = []
+    for i in range(num_poses):
+        c2w = pose_spherical(thetas[i], phis[i], radii[i])
+        new_poses.append(c2w)
+    return np.stack(new_poses, axis=0)
+
+
 @dataclass
 class Dataset:
     W: float
@@ -54,7 +120,6 @@ class Dataset:
     max_eval: int = 2
     imgs: List[jnp.array] = field(default_factory=lambda: [])
     poses: List[jnp.array] = field(default_factory=lambda: [])
-    key: Any = field(default_factory=jax.random.PRNGKey(0))
 
     @property
     def num_examples(self):
@@ -124,6 +189,30 @@ class Dataset:
             else:
                 raise StopIteration
 
+    def gen_render_poses(self, poses, num_poses=5, spherical=False):
+        """
+        Generates some render poses
+        """
+
+        if spherical:
+            thetas = np.linspace(0, 360, num_poses)
+            phis = np.full(num_poses, -30)
+            radii = np.full(num_poses, self.far * 0.8)
+            render_poses = generate_render_poses(thetas, phis, radii)
+            self.render_poses = render_poses
+        else:
+            c2w = self._poses_avg(poses)[:, :4]
+            last_row = np.array([0, 0, 0, 1])
+            c2w = np.vstack([c2w, last_row])
+            render_poses = []
+            for t in np.arange(-1, 1, 0.1):
+                # import pdb; pdb.set_trace()
+
+                transformed_c2w = rot_z(t) @ trans(x=t) @ c2w
+                render_poses.append(transformed_c2w)
+
+            self.render_poses = render_poses
+
     def _recenter_poses(self, poses):
         """Recenter poses according to the original NeRF code."""
         poses_ = poses.copy()
@@ -158,106 +247,6 @@ class Dataset:
     def _normalize(self, x):
         """Normalization helper function."""
         return x / np.linalg.norm(x)
-
-    def _generate_spherical_poses(self, poses, bds):
-        """Generate a 360 degree spherical path for rendering."""
-        # pylint: disable=g-long-lambda
-        p34_to_44 = lambda p: np.concatenate(
-            [p, np.tile(np.reshape(np.eye(4)[-1, :], [1, 1, 4]), [p.shape[0], 1, 1])], 1
-        )
-        rays_d = poses[:, :3, 2:3]
-        rays_o = poses[:, :3, 3:4]
-
-        def min_line_dist(rays_o, rays_d):
-            a_i = np.eye(3) - rays_d * np.transpose(rays_d, [0, 2, 1])
-            b_i = -a_i @ rays_o
-            pt_mindist = np.squeeze(
-                -np.linalg.inv((np.transpose(a_i, [0, 2, 1]) @ a_i).mean(0))
-                @ (b_i).mean(0)
-            )
-            return pt_mindist
-
-        pt_mindist = min_line_dist(rays_o, rays_d)
-        center = pt_mindist
-        up = (poses[:, :3, 3] - center).mean(0)
-        vec0 = self._normalize(up)
-        vec1 = self._normalize(np.cross([0.1, 0.2, 0.3], vec0))
-        vec2 = self._normalize(np.cross(vec0, vec1))
-        pos = center
-        c2w = np.stack([vec1, vec2, vec0, pos], 1)
-        poses_reset = np.linalg.inv(p34_to_44(c2w[None])) @ p34_to_44(poses[:, :3, :4])
-        rad = np.sqrt(np.mean(np.sum(np.square(poses_reset[:, :3, 3]), -1)))
-        sc = 1.0 / rad
-        poses_reset[:, :3, 3] *= sc
-        bds *= sc
-        rad *= sc
-        centroid = np.mean(poses_reset[:, :3, 3], 0)
-        zh = centroid[2]
-        radcircle = np.sqrt(rad**2 - zh**2)
-        new_poses = []
-
-        for th in np.linspace(0.0, 2.0 * np.pi, 120):
-            camorigin = np.array([radcircle * np.cos(th), radcircle * np.sin(th), zh])
-            up = np.array([0, 0, -1.0])
-            vec2 = self._normalize(camorigin)
-            vec0 = self._normalize(np.cross(vec2, up))
-            vec1 = self._normalize(np.cross(vec2, vec0))
-            pos = camorigin
-            p = np.stack([vec0, vec1, vec2, pos], 1)
-            new_poses.append(p)
-
-        new_poses = np.stack(new_poses, 0)
-        new_poses = np.concatenate(
-            [
-                new_poses,
-                np.broadcast_to(poses[0, :3, -1:], new_poses[:, :3, -1:].shape),
-            ],
-            -1,
-        )
-        poses_reset = np.concatenate(
-            [
-                poses_reset[:, :3, :4],
-                np.broadcast_to(poses[0, :3, -1:], poses_reset[:, :3, -1:].shape),
-            ],
-            -1,
-        )
-        return poses_reset
-        return new_poses
-
-    def _generate_spiral_poses(self, poses, bds):
-        """Generate a spiral path for rendering."""
-        c2w = self._poses_avg(poses)
-        # Get average pose.
-        up = self._normalize(poses[:, :3, 1].sum(0))
-        # Find a reasonable "focus depth" for this dataset.
-        close_depth, inf_depth = bds.min() * 0.9, bds.max() * 5.0
-        dt = 0.75
-        mean_dz = 1.0 / (((1.0 - dt) / close_depth + dt / inf_depth))
-        focal = mean_dz
-        # Get radii for spiral path.
-        tt = poses[:, :3, 3]
-        rads = np.percentile(np.abs(tt), 90, 0)
-        c2w_path = c2w
-        n_views = 120
-        n_rots = 2
-        # Generate poses for spiral path.
-        render_poses = []
-        rads = np.array(list(rads) + [1.0])
-        hwf = c2w_path[:, 4:5]
-        zrate = 0.5
-        for theta in np.linspace(0.0, 2.0 * np.pi * n_rots, n_views + 1)[:-1]:
-            c = np.dot(
-                c2w[:3, :4],
-                (
-                    np.array(
-                        [np.cos(theta), -np.sin(theta), -np.sin(theta * zrate), 1.0]
-                    )
-                    * rads
-                ),
-            )
-            z = self._normalize(c - np.dot(c2w[:3, :4], np.array([0, 0, -focal, 1.0])))
-            render_poses.append(np.concatenate([self._viewmatrix(z, up, c), hwf], 1))
-        self.render_poses = np.array(render_poses).astype(np.float32)[:, :3, :4]
 
 
 class LegoDataset(Dataset):
@@ -317,7 +306,7 @@ class LegoDataset(Dataset):
         self.W = W
         self.focal = focal
         if self.subset == "render":
-            self._generate_spiral_poses(self.poses, jnp.array([2.0, 16.0]))
+            self.gen_render_poses(self.poses)
 
 
 class LLFF(Dataset):
@@ -383,9 +372,6 @@ class LLFF(Dataset):
         # Recenter poses.
         poses = self._recenter_poses(poses)
 
-        if self.subset == "render":
-            self._generate_spiral_poses(poses, bds)
-
         self.focal = poses[0, -1, -1]
 
         sample_n = int(len(images) * self.split_frac)
@@ -403,6 +389,9 @@ class LLFF(Dataset):
 
         self.near = np.min(bds) * 0.9
         self.far = np.max(bds) * 1.0
+
+        if self.subset == "render":
+            self.gen_render_poses(poses)
 
         print("focal ", self.focal)
         print("far ", self.far)
