@@ -206,11 +206,11 @@ def test_nerf_fn(dummy_data):
     assert rendered[1].shape == (Config.batch_size, 3)
     assert weights.shape == (
         Config.batch_size,
-        Config.num_samples_fine + Config.num_samples_coarse
+        Config.num_samples_fine + Config.num_samples_coarse,
     )
     assert t.shape == (
         Config.batch_size,
-        Config.num_samples_fine + Config.num_samples_coarse
+        Config.num_samples_fine + Config.num_samples_coarse,
     )
 
 
