@@ -43,4 +43,4 @@ Train your NeRF model using the following command:
 python main.py --config_file=<config file>
 ```
 
-Replace `<config file>` with the path to the configuration file containing the necessary training parameters.
+Replace `<config file>` with the path to the configuration file containing the necessary training parameters. For training on TPU set `num_devices` to the corresponding value, i.e. for v3-8 `num_devices=8`
