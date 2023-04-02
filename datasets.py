@@ -1,6 +1,7 @@
 """
 Datasets for nerf
 Ref: https://github.com/google-research/google-research/blob/master/jaxnerf/nerf/datasets.py
+TODO: Clean this script
 """
 
 import jax
@@ -325,11 +326,10 @@ class LLFF(Dataset):
     def __init__(self, config: NerfConfig, subset: str = "train"):
         self.normalizer = lambda x: x / 255.0
 
-        self.scale = config["scale"]
-
         self.config = config
-
         self.subset = subset
+        self.scale = config.scale
+        self.data_path = config.dataset_path
 
         self.get_raw_data()
 
@@ -339,6 +339,8 @@ class LLFF(Dataset):
 
         self.cache = dict()
 
+        self.key = jax.random.PRNGKey(0)
+
     def get_raw_data(self):
         img_paths = sorted(os.listdir(os.path.join(self.data_path, "images")))
 
@@ -346,6 +348,7 @@ class LLFF(Dataset):
             [
                 self.normalizer(cv2.imread(os.path.join(self.data_path, "images", ip)))
                 for ip in img_paths
+                if "png" in ip or "jpg" in ip
             ]
         )
 
