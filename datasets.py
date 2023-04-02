@@ -397,6 +397,22 @@ class LLFF(Dataset):
 
 
 def dataset_factory(config):
+    """
+    Given a NeRF configuration object, return a dictionary of datasets
+    for training, validation, and rendering based on the specified dataset type.
+
+    Args:
+        config: A NeRF configuration object.
+
+    Returns:
+        A dictionary of datasets for training, validation, and rendering.
+        The dictionary keys are "train", "val", and "render", and the values
+        are dataset objects based on the specified dataset type.
+
+    Raises:
+        ValueError: If the dataset type is not "lego" or "llff".
+    """
+
     if config.dataset_type == "lego":
         return {
             "train": LegoDataset(config, subset="train"),
@@ -410,3 +426,7 @@ def dataset_factory(config):
             "val": LLFF(config, subset="val"),
             "render": LLFF(config, subset="render"),
         }
+    else:
+        raise ValueError(
+            "Invalid dataset type. Must be 'lego' or 'llff', please implement."
+        )
