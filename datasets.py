@@ -54,35 +54,35 @@ def trans(x=0, y=0, z=0):
     )
 
 
-def rot_phi(phi):
+def rot_x(rads):
     return jnp.array(
         [
             [1, 0, 0, 0],
-            [0, jnp.cos(phi), -jnp.sin(phi), 0],
-            [0, jnp.sin(phi), jnp.cos(phi), 0],
+            [0, jnp.cos(rads), -jnp.sin(rads), 0],
+            [0, jnp.sin(rads), jnp.cos(rads), 0],
             [0, 0, 0, 1],
         ],
         dtype=jnp.float32,
     )
 
 
-def rot_theta(th):
+def rot_y(rads):
     return jnp.array(
         [
-            [jnp.cos(th), 0, -jnp.sin(th), 0],
+            [jnp.cos(rads), 0, -jnp.sin(rads), 0],
             [0, 1, 0, 0],
-            [jnp.sin(th), 0, jnp.cos(th), 0],
+            [jnp.sin(rads), 0, jnp.cos(rads), 0],
             [0, 0, 0, 1],
         ],
         dtype=jnp.float32,
     )
 
 
-def rot_z(th):
+def rot_z(rads):
     return jnp.array(
         [
-            [jnp.cos(th), -jnp.sin(th), 0, 0],
-            [jnp.sin(th), jnp.cos(th), 0, 0],
+            [jnp.cos(rads), -jnp.sin(rads), 0, 0],
+            [jnp.sin(rads), jnp.cos(rads), 0, 0],
             [0, 0, 1, 0],
             [0, 0, 0, 1],
         ],
@@ -92,8 +92,8 @@ def rot_z(th):
 
 def pose_spherical(theta, phi, radius):
     c2w = trans(z=radius)
-    c2w = rot_phi(phi / 180.0 * np.pi) @ c2w
-    c2w = rot_theta(theta / 180.0 * np.pi) @ c2w
+    c2w = rot_x(phi / 180.0 * np.pi) @ c2w
+    c2w = rot_y(theta / 180.0 * np.pi) @ c2w
     c2w = jnp.array([[-1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]]) @ c2w
     return c2w
 
