@@ -19,7 +19,7 @@ from datasets import dataset_factory
 
 def train_step(state, key, origins, directions, rgbs, nerf_func, use_hvs):
     """
-    Train step, this function is replicated to all devices
+    Train step
     Inputs:
         state: train state
         key: random key
@@ -71,7 +71,7 @@ def train_step(state, key, origins, directions, rgbs, nerf_func, use_hvs):
 def eval_step(nerf_func, state, val_data, eval_batch_size):
     """
     Evaluation step, takes in an entire image and returns the predicted image
-    and also metrics. This is single device evaluation, future work.
+    and also metrics.
 
     Inputs:
         nerf_func: a function performs the nerf algorithm
@@ -80,6 +80,8 @@ def eval_step(nerf_func, state, val_data, eval_batch_size):
         eval_batch_size: batch size for evaluation
     Outputs:
         pred_imgs: predicted images [H, W, 3]
+        pred_depth: predicted depth [H, W, 3]
+        ssim: structure similarity value
 
     """
 
