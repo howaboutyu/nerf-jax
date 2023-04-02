@@ -201,13 +201,11 @@ class Dataset:
             render_poses = generate_render_poses(thetas, phis, radii)
             self.render_poses = render_poses
         else:
-            c2w = self._poses_avg(poses)[:, :4]
+            c2w = self.poses.mean(0)
             last_row = np.array([0, 0, 0, 1])
             c2w = np.vstack([c2w, last_row])
             render_poses = []
             for t in np.arange(-1, 1, 0.1):
-                # import pdb; pdb.set_trace()
-
                 transformed_c2w = rot_z(t) @ trans(x=t) @ c2w
                 render_poses.append(transformed_c2w)
 
@@ -306,7 +304,7 @@ class LegoDataset(Dataset):
         self.W = W
         self.focal = focal
         if self.subset == "render":
-            self.gen_render_poses(self.poses)
+            self.gen_render_poses(self.poses, spherical=True)
 
 
 class LLFF(Dataset):
