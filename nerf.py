@@ -151,7 +151,6 @@ def get_points(
     # t has shape [batch_size, num_samples (either N_c or N_c + N_f)]
     # direction and origin has shapes [batch_size, 3]
 
-    # points = origin[..., jnp.newaxis, :] + t[..., jnp.newaxis] * direction[..., jnp.newaxis, :]
     points = origin + t[..., jnp.newaxis] * direction
 
     if use_hvs:
@@ -378,8 +377,8 @@ def nerf(
     )
 
     if use_hvs:
-        # get points using hvs
-        # which has num_samples_coarse + num_samples_fine points
+        # get points using hvs by setting `use_hvs` to True
+        # `points_hvs` has num_samples_coarse + num_samples_fine points
         points_hvs, t_hvs, origins_hvs_ray, directions_hvs_ray = get_points(
             key,
             origins,
@@ -409,9 +408,9 @@ def nerf(
             use_random_noise=use_random_noise,
         )
 
-        return (rendered, rendered_hvs), weights_hvs, t_hvs
+        return (rendered, rendered_hvs), jnp.squeeze(weights_hvs), t_hvs
     else:
-        return (rendered, rendered), weights_coarse, t
+        return (rendered, rendered), jnp.squeeze(weights_coarse), t
 
 
 def get_nerf(
