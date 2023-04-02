@@ -1,6 +1,8 @@
-[![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
+
 
 ##  JAX Implementation of NeRF for Scene Synthesis
+
+[![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
 
 ## Overview
 
@@ -25,10 +27,15 @@ For JAX installation, refer to the official [installation documentation](https:/
 Convert a video file to a NeRF dataset using the following command on your local machine:
 
 ```bash
-docker pull bmild/tf_colmap
+# Example converting an IPhone video to NeRF dataset
+VID_FILE=IMG_1425.MOV
+OUT_PATH=llff_datasets/lego_miso
+
+mkdir -p $OUT_PATH/images
 docker run --gpus all -v`pwd`:/nerf -i bmild/tf_colmap bash -c \
-		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.png; \
-		python /nerf/LLFF/imgs2poses.py /nerf/$(OUT_PATH)"
+                "git clone https://github.com/Fyusion/LLFF; \
+                ffmpeg -i /nerf/$VID_FILE -vf fps=2  -pix_fmt bgr8 /nerf/$OUT_PATH/images/img%03d.png; \
+                python LLFF/imgs2poses.py /nerf/$OUT_PATH"
 ```
 
 This command leverages the docker image from [LLFF](https://github.com/Fyusion/LLFF) to run the necessary conversion scripts. Note that a GPU is required for this process, as [COLMAP](https://colmap.github.io/index.html) needs a GPU for feature extraction and matching.
