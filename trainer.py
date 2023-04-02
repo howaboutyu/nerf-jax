@@ -71,7 +71,7 @@ def train_step(state, key, origins, directions, rgbs, nerf_func, use_hvs):
 def eval_step(nerf_func, state, val_data, eval_batch_size):
     """
     Evaluation step, takes in an entire image and returns the predicted image
-    and also metrics. This is single device evaluation
+    and also metrics. This is single device evaluation, future work.
 
     Inputs:
         nerf_func: a function performs the nerf algorithm
@@ -97,6 +97,7 @@ def eval_step(nerf_func, state, val_data, eval_batch_size):
     directions_flattened = eval_directions.reshape(-1, 3)
 
     pred_img_parts = []
+    pred_depth_parts = []
     for i in range(0, origins_flattened.shape[0], eval_batch_size):
         origin = origins_flattened[i : i + eval_batch_size]
         direction = directions_flattened[i : i + eval_batch_size]
@@ -109,8 +110,12 @@ def eval_step(nerf_func, state, val_data, eval_batch_size):
             directions=direction,
         )
 
-        pred_img_parts.append(rendered)
+        depth_hvs = jnp.sum(weights * ts, -1)
 
+        pred_img_parts.append(rendered_hvs)
+        pred_depth_parts.append(depth_hvs)
+
+    # Reshape image
     pred_img = jnp.concatenate(pred_img_parts, axis=0)
     pred_img = pred_img.reshape(eval_origins.shape)
 
@@ -119,7 +124,13 @@ def eval_step(nerf_func, state, val_data, eval_batch_size):
     eval_img = jnp.expand_dims(eval_img, axis=0)
 
     ssim = tf.image.ssim(eval_img, pred_img, max_val=1.0)
-    return pred_img, ssim
+
+    # Reshape depth image
+    pred_depth = jnp.concatenate(pred_depth_parts, axis=0)
+    pred_depth = pred_depth.reshape(eval_origins.shape[:-1])
+    pred_depth = jnp.expand_dims(pred_depth, axis=[0, -1])
+
+    return pred_img, pred_depth, ssim
 
 
 def train_and_evaluate(config: NerfConfig):
@@ -139,6 +150,11 @@ def train_and_evaluate(config: NerfConfig):
 
     # create dataset
     dataset = dataset_factory(config)
+
+    if config.dataset_type == "llff":
+        # set near and far to calculated values
+        config.near = dataset["train"].near
+        config.far = dataset["train"].far
 
     model, params = get_model(config.L_position, config.L_direction)
 
@@ -169,7 +185,7 @@ def train_and_evaluate(config: NerfConfig):
         num_samples_fine=config.num_samples_fine,
         use_hvs=config.use_hvs,
         use_direction=True,
-        use_random_noise=True,
+        use_random_noise=False,
     )
 
     # eval nerf function, no random noise for volume density
@@ -203,6 +219,7 @@ def train_and_evaluate(config: NerfConfig):
         for idx, (img, origins, directions) in enumerate(dataset["train"]):
             key_train = jax.random.split(key, img.shape[0])
             key, _ = jax.random.split(key)
+
             # train step
             state, loss, rgb_pred, weights, ts = p_train_step(
                 state,
@@ -223,13 +240,16 @@ def train_and_evaluate(config: NerfConfig):
             if state.step > 0 and state.step % config.steps_per_eval == 0:
                 # Take the first image from the val set
                 eval_data = dataset["val"].get(0)
-                pred_img, ssim = eval_step(
+                pred_img, pred_depth, ssim = eval_step(
                     eval_nerf_func, state, eval_data, config.batch_size
                 )
                 with summary_writer.as_default(step=state.step):
                     tf.summary.image("pred_img", pred_img[..., ::-1], step=state.step)
                     eval_img = jnp.array([eval_data[0]])
                     tf.summary.image("gt_img", eval_img[..., ::-1], step=state.step)
+                    tf.summary.image(
+                        "pred_depth_img", pred_depth / config.far, step=state.step
+                    )
                     tf.summary.scalar("val ssim", ssim[0], step=state.step)
 
             # Save checkpoint
