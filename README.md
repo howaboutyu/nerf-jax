@@ -51,3 +51,15 @@ python main.py --config_file=<config file>
 ```
 
 Replace `<config file>` with the path to the configuration file containing the necessary training parameters. For training on TPU set `num_devices` to the corresponding value, i.e. for v3-8 `num_devices=8`
+
+
+### Rendering NeRF
+
+After training, the trained NeRF model can be rendered with the following:
+
+```bash
+python3 main.py --config_path=<config file>  --mode=render --render_output_folder=<rendered output folder>
+```
+
+
+
