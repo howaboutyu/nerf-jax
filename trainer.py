@@ -15,6 +15,7 @@ from nerf import (
 )
 from nerf_config import get_config, NerfConfig
 from datasets import dataset_factory
+from renderer import save_img
 
 
 def train_step(state, key, origins, directions, rgbs, nerf_func, use_hvs):
@@ -240,12 +241,14 @@ def train_and_evaluate(config: NerfConfig):
 
             # Evaluation
             if state.step > 0 and state.step % config.steps_per_eval == 0:
+                print(f"[Evaluating] at step {state.step}")
                 # Take the first image from the val set
                 eval_data = dataset["val"].get(0)
                 pred_img, pred_depth, ssim = eval_step(
                     eval_nerf_func, state, eval_data, config.batch_size
                 )
                 with summary_writer.as_default(step=state.step):
+                    save_img(pred_img, f"/tmp/{str(state.step[0]).zfill(10)}.png")
                     tf.summary.image("pred_img", pred_img[..., ::-1], step=state.step)
                     eval_img = jnp.array([eval_data[0]])
                     tf.summary.image("gt_img", eval_img[..., ::-1], step=state.step)
