@@ -21,14 +21,6 @@ from nerf import (
 from nerf_config import get_config, NerfConfig
 from datasets import dataset_factory, trans, rot_z, rot_y, rot_x
 
-FLAGS = flags.FLAGS
-flags.DEFINE_string("config_path", None, "config file path")
-flags.DEFINE_string("render_output_folder", None, "where to output the rendered images")
-flags.DEFINE_bool(
-    "display_render", False, "whether to show the rendered images using cv2.imshow"
-)
-flags.mark_flag_as_required("config_path")
-
 
 def get_nerf_eval_func(config: NerfConfig):
     """Return NeRF function for evaluation"""
@@ -214,22 +206,3 @@ def nerf_to_mesh(config: NerfConfig):
 
     """
     raise NotImplementedError
-
-
-def main(argv):
-    # Remove GPUs for tf
-    tf.config.experimental.set_visible_devices([], "GPU")
-
-    # Load config from yaml file
-    config = get_config(FLAGS.config_path)
-
-    # Render NeRF
-    render_nerf(
-        config,
-        render_output_folder=FLAGS.render_output_folder,
-        display_render=FLAGS.display_render,
-    )
-
-
-if __name__ == "__main__":
-    app.run(main)
