@@ -4,6 +4,9 @@
 
 [![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
 
+[Accompanying blog post](https://www.david-yu.com/blog/nerf/nerf.html#jax-learnings)
+
+
 ## Overview
 
 This repository offers a JAX-based implementation of the [NeRF](https://arxiv.org/abs/2003.08934) method to synthesize novel views of a scene from sparse input data. It enables users to convert video files into NeRF datasets and train & evaluate NeRF models on GPU and TPU-VM. 
