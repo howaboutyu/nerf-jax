@@ -64,5 +64,14 @@ After training, the trained NeRF model can be rendered with the following:
 python3 main.py --config_path=<config file>  --mode=render --render_output_folder=<rendered output folder>
 ```
 
+## Resources 
 
+Other implementations of NeRF:
+
+* [Original NeRF implementation in tf](https://github.com/bmild/nerf) by `@bmild`
+* [NeRF in Jax](https://github.com/google-research/google-research/tree/master/jaxnerf) by `@google-research`
+
+ImageNet example using `Flax` by `@google`:
+
+* [ImageNet example](https://github.com/google/flax/tree/main/examples/imagenet)
 
