@@ -1,24 +1,25 @@
 dataset_name: lego
+dataset_path: nerf_synthetic/lego
+dataset_type: lego 
+
 
 near: 2.
 far: 6.
 
-scale: 0.125
-
-num_samples: 64 
-
+scale: 0.4
+num_samples_coarse: 64 
+num_samples_fine: 128 
 use_hvs: True 
-hvs_num_samples: 128 
-
-# batch size will be equal to jax.local_device_count() 
-# so setting this to true with only one device will be the same
-# as setting to False
-use_batch: True 
-
 L_position: 10 
 L_direction: 4 
 
-num_epochs: 500000000
-init_lr: 5.e-5
+num_epochs: 10_000
+learning_rate: 5.e-4
+optimizer: adam
+batch_size: 2048 
+num_devices: 1
+steps_per_eval: 2000
 
 ckpt_dir: 'ckpt_lego_dir'
+load_ckpt_dir: 'ckpt_lego_dir'
+

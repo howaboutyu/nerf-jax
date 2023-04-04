@@ -1,10 +1,15 @@
+
+GCP_GPU_VM = 'nerf-gpu-instance'
+
 build:
 	@echo "building a jax image with gpu"
 	sudo docker build . -t jax-gpu -f Dockerfile.gpu
 
 
 get_mini_nerf_data:
+	# Unused in this repo
 	wget https://people.eecs.berkeley.edu/~bmild/nerf/tiny_nerf_data.npz
+	unzip tiny_nerf_data.npz
 
 get_nerf_example_data:
 	wget http://cseweb.ucsd.edu/~viscomp/projects/LF/papers/ECCV20/nerf/nerf_example_data.zip
@@ -16,17 +21,9 @@ start:
 train_lego:
 	sudo docker run --gpus all -p 8888:8888 -v/tmp:/tmp -v`pwd`:/nerf -it jax-gpu:latest python3 train.py
 
-llff_pose_from_vid:
-	echo 'let.s get it'
-
-	#mkdir LLFF && cd LLFF && 
-	#git clone https://github.com/Fyusion/LLFF
-	#sudo docker run --gpus all -v`pwd`:/nerf -it bmild/tf_colmap bash
-
-gcp_gpu_vm = 'gpu-instance-1'
 start_gpu_convert:
 	# create gpu vm and run setup scripts - install cuda, docker, nerf-jax repo
-	-gcloud compute instances create $(gcp_gpu_vm) \
+	gcloud compute instances create $(GCP_GPU_VM) \
     --machine-type n1-standard-2 \
     --zone us-east1-d \
     --boot-disk-size 40GB \
@@ -35,23 +32,23 @@ start_gpu_convert:
     --image-project ubuntu-os-cloud \
     --maintenance-policy TERMINATE --restart-on-failure
 
-	gcloud compute scp scripts/setup_gpu.sh $(gcp_gpu_vm):/tmp
-	gcloud compute ssh $(gcp_gpu_vm) --command \
+	gcloud compute scp scripts/setup_gpu.sh $(GCP_GPU_VM):/tmp
+	gcloud compute ssh $(GCP_GPU_VM) --command \
 		'bash /tmp/setup_gpu.sh' 
 
 delete_gpu_vm:
-	gcloud compute instances delete $(gcp_gpu_vm)
+	gcloud compute instances delete $(GCP_GPU_VM)
 
 vid_to_nerf_cloud:
 	# cloud vid -> nerf converter
 
-	echo Converting $(VID_FILE) on $(gcp_gpu_vm) the output will be in $(OUT_PATH)
-	gcloud compute scp $(VID_FILE) $(gcp_gpu_vm):~/nerf
+	echo Converting $(VID_FILE) on $(GCP_GPU_VM) the output will be in $(OUT_PATH)
+	gcloud compute scp $(VID_FILE) $(GCP_GPU_VM):~/nerf
 
-	gcloud compute ssh $(gcp_gpu_vm) --command \
+	gcloud compute ssh $(GCP_GPU_VM) --command \
 		"cd ~/nerf && sudo make vid_to_nerf VID_FILE=$(VID_FILE) OUT_PATH=$(OUT_PATH)"
 
-	gcloud compute scp --recurse $(gcp_gpu_vm):~/nerf/$(OUT_PATH) .
+	gcloud compute scp --recurse $(GCP_GPU_VM):~/nerf/$(OUT_PATH) .
 
 vid_to_nerf:
 	# Local vid -> nerf converter
@@ -61,8 +58,6 @@ vid_to_nerf:
 	sudo docker run --gpus all -v`pwd`:/nerf -i bmild/tf_colmap bash -c \
 		"ffmpeg -i /nerf/$(VID_FILE) -vf fps=2 /nerf/$(OUT_PATH)/images/img%03d.png; \
 		python /nerf/LLFF/imgs2poses.py /nerf/$(OUT_PATH)"
-
-
 
 create_tpu_vm:
 	# Setup 
@@ -93,12 +88,8 @@ start_tpu_vm:
 stop_tpu_vm:
 	gcloud compute tpus tpu-vm stop nerf --zone europe-west4-a 
 
-
 connect_tpu_vm:
 	gcloud compute tpus tpu-vm ssh nerf --zone europe-west4-a
-
-setup_vm:
-	pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
 delete_tpu_vm:
 	gcloud compute tpus tpu-vm delete nerf  --zone europe-west4-a
@@ -108,3 +99,7 @@ list_vm:
 	gcloud compute tpus tpu-vm list --zone europe-west4-a
 	echo '############### GPU ##############'
 	gcloud compute instances list
+
+
+test:
+	CUDA_VISIBLE_DEVICES=-1 python3 -m pytest test*

@@ -2,3 +2,4 @@ flax
 opencv-python
 tensorflow
 pyyaml
+pytest
