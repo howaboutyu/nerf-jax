@@ -4,7 +4,7 @@
 
 [![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
 
-[Accompanying blog post](https://www.david-yu.com/blog/nerf/nerf.html#jax-learnings)
+[Accompanying blog post](https://www.david-yu.com/blog/nerf/nerf.html)
 
 
 ## Overview
