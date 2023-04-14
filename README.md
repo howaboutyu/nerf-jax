@@ -3,6 +3,8 @@
 ##  JAX Implementation of NeRF for Scene Synthesis
 
 [![pytest](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml/badge.svg)](https://github.com/higgsboost/nerf-jax/actions/workflows/pytest.yml)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 
 [Accompanying blog post](https://www.david-yu.com/blog/nerf/nerf.html)
 
